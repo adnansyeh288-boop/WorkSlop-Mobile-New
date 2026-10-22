@@ -1,18 +1,18 @@
 import SwiftUI
 
 /// Live preview at the top of the Liquid Glass page (owner's design,
-/// 2026-10-22): a blue wallpaper card with one glass pill in the
-/// middle that reads "Liquid Glass Preview". The pill mirrors three
-/// REAL staged tweaks — it is a readout of the staging state, never
-/// a decoration that pretends:
+/// 2026-10-22): a blue wallpaper card holding ONE notification
+/// banner. The banner mirrors the REAL staged tweaks — it is a live
+/// readout of the staging state, never a static picture:
 ///
 /// - Force Solarium Fallback staged (`lg-force-fallback` or
-///   `lg-ui-force-fallback`) → the glass is off: the pill goes flat
-///   grey and the card's "Liquid Glass Enable/Disable" title greys
-///   out with it.
+///   `lg-ui-force-fallback`) → Liquid Glass is disabled: the banner
+///   turns flat grey, exactly the disabled look, and the card's
+///   "Liquid Glass Enable/Disable" title greys out with it. This
+///   happens the moment the toggle is staged — no Apply, no restart.
 /// - White Glass Highlight staged (`lg-highlight-white`) → a bright
-///   white reflection appears on the pill's edge.
-/// - Solarium Text Frost staged (`lg-text-frost`) → the pill's
+///   white reflection appears on the banner's edge.
+/// - Solarium Text Frost staged (`lg-text-frost`) → the banner's
 ///   material turns thick and frosted.
 struct LiquidGlassPreviewCard: View {
     @EnvironmentObject private var selection: SelectionStore
@@ -51,49 +51,79 @@ struct LiquidGlassPreviewCard: View {
                 .blur(radius: 28)
                 .offset(x: 120, y: 55)
 
-            pill
+            banner
+                .padding(.horizontal, 14)
         }
         .frame(height: 168)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: selection.staged)
         .accessibilityIdentifier("lg-preview")
     }
 
-    private var pill: some View {
-        Text("Liquid Glass Preview")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(disabled ? Color(white: 0.32) : Color.primary)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 11)
-            .background {
-                if disabled {
-                    Capsule().fill(Color(red: 0.79, green: 0.79, blue: 0.79))
-                } else if frosted {
-                    Capsule().fill(.regularMaterial)
-                } else {
-                    Capsule().fill(.ultraThinMaterial)
+    /// The notification banner itself. Only its material changes
+    /// with the staged tweaks — glass, frosted, or the flat grey of
+    /// disabled Liquid Glass.
+    private var banner: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.10, green: 0.45, blue: 0.95),
+                                 Color(red: 0.35, green: 0.65, blue: 1.0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 38, height: 38)
+                .overlay {
+                    Image(systemName: "bell.fill")
+                        .font(.system(size: 17))
+                        .foregroundStyle(.white)
                 }
-            }
-            .overlay {
-                if !disabled {
-                    Capsule()
-                        .strokeBorder(.white.opacity(highlight ? 0.95 : 0.55),
-                                      lineWidth: highlight ? 1.4 : 1)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text("WorkSlop")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("now")
+                        .font(.caption2)
+                        .foregroundStyle(disabled ? Color(white: 0.45) : .secondary)
                 }
+                Text("This notification uses Liquid Glass.")
+                    .font(.subheadline)
+                    .lineLimit(2)
             }
-            .overlay {
-                // The highlight tweak's reflection: a white sheen
-                // pooled at the pill's top edge.
-                if highlight && !disabled {
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [.white.opacity(0.55), .white.opacity(0.0)],
-                                startPoint: .top,
-                                endPoint: .center
-                            )
+            .foregroundStyle(disabled ? Color(white: 0.25) : Color.primary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(disabled ? AnyShapeStyle(Color(white: 0.83))
+                      : frosted ? AnyShapeStyle(.regularMaterial)
+                      : AnyShapeStyle(.ultraThinMaterial))
+        }
+        .overlay {
+            if !disabled {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(.white.opacity(highlight ? 0.95 : 0.55),
+                                  lineWidth: highlight ? 1.4 : 1)
+            }
+        }
+        .overlay {
+            // The highlight tweak's reflection: a white sheen
+            // pooled at the banner's top edge.
+            if highlight && !disabled {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.55), .white.opacity(0.0)],
+                            startPoint: .top,
+                            endPoint: .center
                         )
-                }
+                    )
             }
-            .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
     }
 }

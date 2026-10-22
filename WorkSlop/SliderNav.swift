@@ -102,34 +102,48 @@ struct ShellListInsets: ViewModifier {
 
 /// One glass slider bar. The selected page is a white pill with
 /// black text (iOS 26 style); the rest are dark-blue labels on the
-/// glass. The bar scrolls horizontally and keeps the selection in
-/// view when the page changes from the other bar.
+/// glass. The pill is ONE shape shared by every item through a
+/// matched-geometry effect: on a page change it stretches and
+/// springs into its new item like a liquid-glass bubble instead of
+/// blinking out in one place and in at another. Items are compact
+/// (owner's fix, 2026-10-22: the first three — Recommend on top,
+/// Status Bar below — must never be clipped on Home) and the bar
+/// still scrolls horizontally, keeping the selection in view.
 struct SliderBar: View {
     let pages: [MainPage]
     @Binding var selection: MainPage
+    @Namespace private var pillNS
+
+    /// The liquid spring: quick response, low damping — the pill
+    /// overshoots a touch and settles, like glass finding its shape.
+    private var liquidSpring: Animation {
+        .spring(response: 0.45, dampingFraction: 0.68)
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
+                HStack(spacing: 2) {
                     ForEach(pages, id: \.self) { page in
                         Button {
                             selection = page
                         } label: {
-                            HStack(spacing: 5) {
+                            HStack(spacing: 4) {
                                 Image(systemName: page.icon)
                                     .font(.footnote.weight(.semibold))
                                 Text(page.title)
-                                    .font(.subheadline.weight(.semibold))
+                                    .font(.footnote.weight(.semibold))
                                     .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                             }
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
                             .background {
                                 if selection == page {
                                     Capsule()
                                         .fill(.white)
                                         .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+                                        .matchedGeometryEffect(id: "slider-pill", in: pillNS)
                                 }
                             }
                             .foregroundStyle(selection == page
@@ -142,11 +156,12 @@ struct SliderBar: View {
                         .accessibilityIdentifier("slider-\(page.title)")
                     }
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 5)
+                .animation(liquidSpring, value: selection)
             }
             .onChange(of: selection) { newValue in
-                withAnimation { proxy.scrollTo(newValue, anchor: .center) }
+                withAnimation(liquidSpring) { proxy.scrollTo(newValue, anchor: .center) }
             }
             .onAppear {
                 proxy.scrollTo(selection, anchor: .center)

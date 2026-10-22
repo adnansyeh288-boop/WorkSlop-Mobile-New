@@ -84,24 +84,36 @@ struct MainMenuView: View {
             switch page {
             case .home:
                 homePage
+                    .transition(pageTransition)
             case .iconThemes:
                 pageShell(title: MainPage.iconThemes.title) {
                     IconThemesView(embedded: true)
                 }
+                .transition(pageTransition)
             case .statusBar:
                 pageShell(title: MainPage.statusBar.title) {
                     StatusBarView(embedded: true)
                 }
+                .transition(pageTransition)
             case .liquidGlass, .recommend, .springBoard, .appleInternal, .daemons, .posterBoard:
                 if let group = page.tweakGroup {
                     pageShell(title: group.id) {
                         TweakListView(group: group, embedded: true)
                     }
+                    .transition(pageTransition)
                 } else {
                     EmptyView()
                 }
             }
         }
+        .animation(.spring(response: 0.5, dampingFraction: 0.9), value: page)
+    }
+
+    /// Page changes cross-fade with a whisper of scale instead of
+    /// cutting hard (owner's fix, 2026-10-22: transitions felt
+    /// stiff). Paired with the shell's spring on `page`.
+    private var pageTransition: AnyTransition {
+        .opacity.combined(with: .scale(scale: 0.98))
     }
 
     /// A tweak page: the page's own view (with its own SkyBackground)

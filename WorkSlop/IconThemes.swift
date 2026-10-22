@@ -302,6 +302,13 @@ struct IconThemesView: View {
         ZStack {
             SkyBackground()
             List {
+                Section {
+                    IconBeforeAfterCarousel()
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 4, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+
                 if !iconStage.staged.isEmpty {
                     Section {
                         ForEach(iconStage.staged) { entry in
@@ -376,6 +383,58 @@ struct IconThemesView: View {
         }
         .navigationTitle(embedded ? "" : "Icon Themes")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Before/After preview at the top of the Icon Themes page
+/// (owner's mock, 2026-10-22): the owner's own Home Screen
+/// screenshots (bundled as IconPreviewBefore / IconPreviewAfter)
+/// in a phone frame. Before fills the frame first; swipe for
+/// After, also full frame. Two dots sit centered under the frame.
+struct IconBeforeAfterCarousel: View {
+    @State private var page = 0
+
+    var body: some View {
+        VStack(spacing: 10) {
+            TabView(selection: $page) {
+                framed(image: "IconPreviewBefore", label: "Before").tag(0)
+                framed(image: "IconPreviewAfter", label: "After").tag(1)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: 505)
+            HStack(spacing: 6) {
+                ForEach(0..<2, id: \.self) { index in
+                    Circle()
+                        .fill(index == page ? Color.blue : Color.gray.opacity(0.35))
+                        .frame(width: 7, height: 7)
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: page)
+        }
+        .accessibilityIdentifier("icon-before-after")
+    }
+
+    private func framed(image name: String, label: String) -> some View {
+        ZStack(alignment: .topLeading) {
+            Image(name)
+                .resizable()
+                .scaledToFill()
+            Text(label)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(.black.opacity(0.55)))
+                .padding(12)
+        }
+        .frame(width: 232, height: 505)
+        .clipShape(RoundedRectangle(cornerRadius: 40, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 40, style: .continuous)
+                .strokeBorder(.black, lineWidth: 5)
+        )
+        .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
+        .frame(maxWidth: .infinity)
     }
 }
 
