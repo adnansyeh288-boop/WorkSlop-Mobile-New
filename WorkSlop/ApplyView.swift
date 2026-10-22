@@ -48,6 +48,8 @@ struct ApplyView: View {
                     preflightRow("Icon themes staged", ok: true,
                                  detail: "\(iconStage.staged.count)")
                 }
+                preflightRow("Build support", ok: BuildSupport.current != .unsupported,
+                             detail: BuildSupport.current.displayText)
                 preflightRow("Pairing file imported", ok: status.pairingImported, detail: nil)
                 preflightRow("VPN tunnel detected", ok: status.vpnDetected, detail: nil)
             } header: {

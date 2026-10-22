@@ -33,6 +33,9 @@ struct MainMenuView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         hero
+                        if BuildSupport.current == .partial {
+                            partialSupportCard
+                        }
                         deviceCard
                         applyButton
                         menusCard
@@ -111,6 +114,27 @@ struct MainMenuView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.top, 8)
+    }
+
+    /// Shown only on Partially Supported builds (the iOS 27 line):
+    /// the app works, but that path is not device-proven from this
+    /// app yet — the warning is the point of the tier.
+    private var partialSupportCard: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Partially supported build")
+                    .font(.subheadline.weight(.semibold))
+                Text("This device runs \(BuildSupport.currentBuildLabel ?? "iOS 27") (\(DeviceInfoEx.buildNumber)). The iOS 27 path works but is not device-proven from this app yet — applying is at your own risk.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(cardBackground)
+        .accessibilityIdentifier("partial-support-warning")
     }
 
     // MARK: - Device gates

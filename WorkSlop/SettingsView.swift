@@ -12,6 +12,8 @@ struct SettingsView: View {
                 Section {
                 LabeledContent("Version", value: "2.0")
                 LabeledContent("This device's iOS", value: DeviceInfoEx.fullVersion)
+                LabeledContent("Build", value: DeviceInfoEx.buildNumber)
+                LabeledContent("Build support", value: BuildSupport.current.displayText)
                 Text("iOS 26: Partial restore (sparse restore, no wipe). iOS 27: a protective backup of all data is taken first, the tweaks are injected into it, and the modified backup is restored.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
