@@ -15,7 +15,7 @@ enum PairingRecord {
     /// list**: the picker built its array from these names and the URL handler
     /// hard-coded the same three again, so adding a fourth would have worked in
     /// one path and silently not in the other.
-    static let extensions = ["mobiledevicepairing", "mobiledevicepair", "mobiledeviceconfig"]
+    static let extensions = ["mobiledevicepairing", "mobiledevicepair", "mobiledeviceconfig", "plist"]
 
     static let types: [UTType] = extensions.compactMap {
         UTType(filenameExtension: $0, conformingTo: .data)

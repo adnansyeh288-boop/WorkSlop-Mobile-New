@@ -30,7 +30,7 @@ struct SettingsView: View {
             Section {
                 LabeledContent("Developer", value: "adnan.120hz")
                 Link("TikTok @adnan.120hz", destination: URL(string: "https://www.tiktok.com/@adnan.120hz")!)
-                Text("Beta testers: Charlie, rfrz1d_, Davy (@Davydavpn), uggtx, Fayaz")
+                Text("Beta testers: Charlie, rfrz1d_, Davy, uggtx, Fayaz, alfndv1")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Text("iOS 18 icon pack: catwithabaloon (v2.0)")

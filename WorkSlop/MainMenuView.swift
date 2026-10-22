@@ -73,9 +73,14 @@ struct MainMenuView: View {
             default: break
             }
         }
+        // `.data` is in the list on purpose: pairing files sitting in a file
+        // provider (Telegram/Downloads in Recents) can carry a dynamic UTI
+        // that does not conform to the plist types, which greys them out in
+        // the picker (seen on iOS 27.0.1). Content is validated on import —
+        // `PairingRecord.accept` rejects anything that is not a usable plist.
         .fileImporter(
             isPresented: $importing,
-            allowedContentTypes: PairingRecord.types + [.propertyList]
+            allowedContentTypes: PairingRecord.types + [.propertyList, .data]
         ) { result in
             switch result {
             case .success(let url): flashNote(importPairing(from: url) ?? "Pairing file saved.")
