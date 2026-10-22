@@ -4,13 +4,7 @@ name: Build IPA
 # The full xcodebuild log is ALWAYS uploaded too, so a failed build
 # leaves a downloadable log to send back for fixing.
 # No simulator, no recordings, ever.
-#
-# Triggers:
-# - push  → setiap commit baru ke main/master langsung auto-build
-# - workflow_dispatch → bisa dijalankan manual kapan saja
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
 
 jobs:
@@ -31,66 +25,6 @@ jobs:
           xcodebuild -showsdks | grep -i iphoneos
       - name: Install XcodeGen
         run: brew install xcodegen
-
-      - name: Build idevice FFI (Rust, for iOS 27 pairing)
-        run: |
-          # Install Rust if needed
-          if ! command -v cargo &> /dev/null; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-            source "$HOME/.cargo/env"
-          fi
-          export PATH="$HOME/.cargo/bin:$PATH"
-          rustup target add aarch64-apple-ios
-          # Shallow clone the idevice repo
-          git clone --depth 1 https://github.com/jkcoxson/idevice.git /tmp/idevice
-          cd /tmp/idevice/ffi
-          # Build staticlib for iOS (device only; simulator not needed)
-          cargo build --target aarch64-apple-ios --release \
-            --no-default-features --features remote_pairing,rustcrypto --lib
-          mkdir -p "$GITHUB_WORKSPACE/WorkSlop/Libs"
-          cp /tmp/idevice/target/aarch64-apple-ios/release/libidevice_ffi.a \
-             "$GITHUB_WORKSPACE/WorkSlop/Libs/"
-          ls -la "$GITHUB_WORKSPACE/WorkSlop/Libs/"
-
-      - name: Cache AirliftFFI.xcframework (AirCard, for AirFlit menu)
-        id: airlift-cache
-        uses: actions/cache@v4
-        with:
-          path: .ci-cache/AirliftFFI.xcframework
-          # Pinned in .github/airlift-ffi.pin — bump the SHA there to re-fetch.
-          key: airlift-ffi-${{ hashFiles('.github/airlift-ffi.pin') }}
-
-      - name: Fetch AirliftFFI.xcframework
-        if: steps.airlift-cache.outputs.cache-hit != 'true'
-        run: |
-          set -e
-          # MIT-licensed prebuilt from the AirCard project
-          # (https://github.com/Mak5er/AirCard-iOS). 100% AirCard method for
-          # the AirFlit menu. ~127 MB — NOT committed to the repo, fetched
-          # here and cached above.
-          rm -rf /tmp/aircard-xcframework
-          git clone --depth 1 --filter=blob:none --sparse \
-            https://github.com/Mak5er/AirCard-iOS.git /tmp/aircard-xcframework
-          cd /tmp/aircard-xcframework
-          git sparse-checkout set AirliftFFI.xcframework
-          git checkout --quiet
-          mkdir -p "$GITHUB_WORKSPACE/.ci-cache"
-          rm -rf "$GITHUB_WORKSPACE/.ci-cache/AirliftFFI.xcframework"
-          cp -R AirliftFFI.xcframework "$GITHUB_WORKSPACE/.ci-cache/"
-          ls -la "$GITHUB_WORKSPACE/.ci-cache/AirliftFFI.xcframework"
-
-      - name: Stage AirliftFFI for xcodegen
-        run: |
-          set -e
-          # xcodegen links WorkSlop/Frameworks/AirliftFFI.xcframework
-          # (see project.yml). Kept out of git via .gitignore.
-          mkdir -p "$GITHUB_WORKSPACE/WorkSlop/Frameworks"
-          rm -rf "$GITHUB_WORKSPACE/WorkSlop/Frameworks/AirliftFFI.xcframework"
-          cp -R "$GITHUB_WORKSPACE/.ci-cache/AirliftFFI.xcframework" \
-                "$GITHUB_WORKSPACE/WorkSlop/Frameworks/"
-          # Xcode auto-selects the ios-arm64 slice for device builds;
-          # the simulator slice is never used (no simulator, ever).
-          ls "$GITHUB_WORKSPACE/WorkSlop/Frameworks/AirliftFFI.xcframework"
 
       - name: Generate project
         run: xcodegen generate
