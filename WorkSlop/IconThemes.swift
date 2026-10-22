@@ -292,6 +292,10 @@ enum WebClipPayloads {
 /// variant (Light / Dark / Tinted) from the catwithabaloon pack.
 /// Tapping a gallery row stages that icon; tapping it again unstages.
 struct IconThemesView: View {
+    /// Set when the view is a page of the slider shell: the shell's
+    /// floating chrome owns the title, and the list gains clearances
+    /// so rows never hide behind the sliders.
+    var embedded = false
     @EnvironmentObject private var iconStage: IconThemeStage
 
     var body: some View {
@@ -302,7 +306,7 @@ struct IconThemesView: View {
                     Section {
                         ForEach(iconStage.staged) { entry in
                             HStack(spacing: 12) {
-                                iconThumbnail(slug: entry.slug, variant: entry.iconVariant)
+                                IconThumbnail(slug: entry.slug, variant: entry.iconVariant)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entry.appName)
                                     Text(entry.variant)
@@ -324,8 +328,37 @@ struct IconThemesView: View {
 
                 ForEach(IconVariant.allCases, id: \.self) { variant in
                     Section {
-                        ForEach(IOS18IconCatalog.byVariant[variant] ?? []) { icon in
-                            galleryRow(icon, variant: variant)
+                        // Each variant is its own table with a short
+                        // preview; the All Icons row at the bottom
+                        // opens the variant's full list (owner's
+                        // layout, 2026-10-22).
+                        let icons = IOS18IconCatalog.byVariant[variant] ?? []
+                        ForEach(Array(icons.prefix(4))) { icon in
+                            IconGalleryRow(icon: icon, variant: variant)
+                        }
+                        if icons.count > 4 {
+                            NavigationLink {
+                                IconVariantListView(variant: variant)
+                            } label: {
+                                HStack(spacing: 12) {
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Color.blue.opacity(0.12))
+                                        .frame(width: 44, height: 44)
+                                        .overlay {
+                                            Image(systemName: "square.grid.2x2.fill")
+                                                .foregroundStyle(.blue)
+                                        }
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("All Icons")
+                                            .foregroundStyle(.primary)
+                                        Text("\(icons.count) icons")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                }
+                            }
+                            .accessibilityIdentifier("icon-theme-all-\(variant.rawValue)")
                         }
                     } header: {
                         HStack {
@@ -339,19 +372,29 @@ struct IconThemesView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .modifier(ShellListInsets(enabled: embedded))
         }
-        .navigationTitle("Icon Themes")
+        .navigationTitle(embedded ? "" : "Icon Themes")
         .navigationBarTitleDisplayMode(.inline)
     }
+}
 
-    private func galleryRow(_ icon: IOS18Icon, variant: IconVariant) -> some View {
+/// One gallery row: tap stages (or unstages) the icon for this
+/// variant. Shared by the Icon Themes page's previews and the
+/// per-variant full lists so both behave identically.
+struct IconGalleryRow: View {
+    let icon: IOS18Icon
+    let variant: IconVariant
+    @EnvironmentObject private var iconStage: IconThemeStage
+
+    var body: some View {
         let staged = iconStage.stagedEntry(bundleID: icon.bundleID)
         let isStagedHere = staged?.variant == variant.rawValue
-        return Button {
+        Button {
             iconStage.toggle(icon, variant: variant)
         } label: {
             HStack(spacing: 12) {
-                iconThumbnail(slug: icon.slug, variant: variant)
+                IconThumbnail(slug: icon.slug, variant: variant)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(icon.name)
                         .foregroundStyle(.primary)
@@ -372,8 +415,44 @@ struct IconThemesView: View {
         }
         .accessibilityIdentifier("icon-theme-\(variant.rawValue)-\(icon.slug)")
     }
+}
 
-    private func iconThumbnail(slug: String, variant: IconVariant) -> some View {
+/// The full icon list of ONE variant — what a table's All Icons row
+/// opens. Same rows, same staging, its own Select All.
+struct IconVariantListView: View {
+    let variant: IconVariant
+    @EnvironmentObject private var iconStage: IconThemeStage
+
+    var body: some View {
+        ZStack {
+            SkyBackground()
+            List {
+                Section {
+                    ForEach(IOS18IconCatalog.byVariant[variant] ?? []) { icon in
+                        IconGalleryRow(icon: icon, variant: variant)
+                    }
+                } header: {
+                    HStack {
+                        Text(variant.rawValue)
+                        Spacer()
+                        Button("Select All") { iconStage.selectAll(variant: variant) }
+                            .font(.subheadline)
+                            .textCase(nil)
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+        }
+        .navigationTitle("\(variant.rawValue) Icons")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct IconThumbnail: View {
+    let slug: String
+    let variant: IconVariant
+
+    var body: some View {
         Group {
             if let image = IOS18IconCatalog.image(slug: slug, variant: variant) {
                 Image(uiImage: image)

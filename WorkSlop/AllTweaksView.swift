@@ -74,13 +74,32 @@ struct TweakGroup: Identifiable, Hashable {
 }
 
 /// The tweak options of one group: plain toggles, never sliders.
+/// `embedded` is set when the view is a page of the slider shell:
+/// the shell's floating chrome owns the title then, and the list
+/// gains clearances so rows never hide behind the sliders.
 struct TweakListView: View {
     let group: TweakGroup
+    var embedded = false
+    @EnvironmentObject private var selection: SelectionStore
 
     var body: some View {
         ZStack {
             SkyBackground()
             List {
+                if group.id == "Liquid Glass" {
+                    Section {
+                        LiquidGlassPreviewCard()
+                            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    } header: {
+                        Text("Liquid Glass Enable/Disable")
+                            .textCase(nil)
+                            .foregroundStyle(
+                                LiquidGlassPreviewCard.isDisabled(selection)
+                                    ? .secondary : .primary)
+                    }
+                }
                 Section {
                     ForEach(FeatureCatalog.features(in: group.catalogSection)) { feature in
                         if feature.id == "lg-corner-radius" {
@@ -121,8 +140,9 @@ struct TweakListView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .modifier(ShellListInsets(enabled: embedded))
         }
-        .navigationTitle(group.id)
+        .navigationTitle(embedded ? "" : group.id)
         .navigationBarTitleDisplayMode(.inline)
     }
 }

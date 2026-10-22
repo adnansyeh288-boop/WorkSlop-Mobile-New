@@ -8,13 +8,18 @@ import SwiftUI
 /// it to the engine, which writes the classic status bar struct on
 /// iOS 26 and the overrides archive on iOS 27.
 struct StatusBarView: View {
+    /// Set when the view is a page of the slider shell: the shell's
+    /// floating chrome owns the title, and the list gains clearances
+    /// so rows never hide behind the sliders.
+    let embedded: Bool
     @State private var selection: StatusBarSelection
     /// The carrier name being typed, before Save commits it. Nil when
     /// the field is untouched — the Save button exists only while a
     /// draft differs from the saved name.
     @State private var carrierDraft: String?
 
-    init() {
+    init(embedded: Bool = false) {
+        self.embedded = embedded
         var loaded = StatusBarSelection()
         if let stored = StatusBarPreferences.storedSelection() {
             loaded.restore(from: stored)
@@ -116,8 +121,9 @@ struct StatusBarView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .modifier(ShellListInsets(enabled: embedded))
         }
-        .navigationTitle("Status Bar")
+        .navigationTitle(embedded ? "" : "Status Bar")
         .navigationBarTitleDisplayMode(.inline)
     }
 

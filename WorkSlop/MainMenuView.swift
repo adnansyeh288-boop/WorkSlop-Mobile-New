@@ -1,7 +1,10 @@
 import SwiftUI
 
-/// Home: the WorkSlop hero, device gates, the Apply button, and the
-/// two menus (All Tweaks, Settings). SkyBackground behind everything.
+/// The app shell: two glass sliders (top + bottom) switch between
+/// Home and the tweak pages — the old All Tweaks menu is gone
+/// (owner's design, 2026-10-22). Home keeps the WorkSlop hero, the
+/// device gates, the Apply button, and the Settings/Log/Remove
+/// menus. Every page keeps its own SkyBackground.
 ///
 /// Screenshot runs deep-link with `-DemoScreen <name>`:
 /// home | alltweaks | settings | apply.
@@ -18,6 +21,7 @@ struct MainMenuView: View {
     @EnvironmentObject private var status: StatusStore
     @EnvironmentObject private var selection: SelectionStore
     @EnvironmentObject private var iconStage: IconThemeStage
+    @State private var page: MainPage = .home
     @State private var path: [HomeRoute] = []
     @State private var importing = false
     @State private var pairingNote: String?
@@ -31,42 +35,7 @@ struct MainMenuView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            ZStack {
-                SkyBackground()
-                ScrollView {
-                    VStack(spacing: 16) {
-                        hero
-                        if BuildSupport.current == .partial {
-                            partialSupportCard
-                        }
-                        deviceCard
-                        applyButton
-                        menusCard
-                        pairingGenerateCard
-                        LockBanner()
-                    }
-                    .padding()
-                }
-                .onChange(of: wireless.phase) { newPhase in
-                    // The library wrote a fresh record to the canonical
-                    // path: adopt it through the same validation an
-                    // imported file gets, then start the backend the way
-                    // a successful import does.
-                    guard newPhase == .paired else { return }
-                    adoptGeneratedPairing()
-                }
-                .onChange(of: pairingNote) { new in
-                    // Transient notes only: clear after 6s so a stale
-                    // message never sits on screen.
-                    guard let current = new else { return }
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .seconds(6))
-                        if pairingNote == current {
-                            pairingNote = nil
-                        }
-                    }
-                }
-            }
+            shell
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: HomeRoute.self) { route in
                 switch route {
@@ -81,7 +50,7 @@ struct MainMenuView: View {
         .onAppear {
             guard path.isEmpty, let s = demoScreen else { return }
             switch s {
-            case "alltweaks": path = [.allTweaks]
+            case "alltweaks": page = .liquidGlass
             case "settings": path = [.settings]
             case "apply": path = [.apply]
             default: break
@@ -103,6 +72,92 @@ struct MainMenuView: View {
         }
         .sheet(isPresented: $showTunnelInfo) { TunnelInfoView() }
         .sheet(isPresented: $showAbout) { AboutInfoView() }
+    }
+
+    // MARK: - Shell (two sliders)
+
+    /// The page switch: exactly one page is alive at a time, like
+    /// the old push navigation — pages are never stacked or kept
+    /// resident side by side.
+    private var shell: some View {
+        Group {
+            switch page {
+            case .home:
+                homePage
+            case .iconThemes:
+                pageShell(title: MainPage.iconThemes.title) {
+                    IconThemesView(embedded: true)
+                }
+            case .statusBar:
+                pageShell(title: MainPage.statusBar.title) {
+                    StatusBarView(embedded: true)
+                }
+            case .liquidGlass, .recommend, .springBoard, .appleInternal, .daemons, .posterBoard:
+                if let group = page.tweakGroup {
+                    pageShell(title: group.id) {
+                        TweakListView(group: group, embedded: true)
+                    }
+                } else {
+                    EmptyView()
+                }
+            }
+        }
+    }
+
+    /// A tweak page: the page's own view (with its own SkyBackground)
+    /// fills the screen; the header + sliders float over it.
+    private func pageShell<Content: View>(title: String,
+                                          @ViewBuilder content: () -> Content) -> some View {
+        ZStack {
+            content()
+            ShellChrome(title: title, page: $page)
+        }
+    }
+
+    private var homePage: some View {
+        ZStack(alignment: .bottom) {
+            SkyBackground()
+            ScrollView {
+                VStack(spacing: 16) {
+                    hero
+                    if BuildSupport.current == .partial {
+                        partialSupportCard
+                    }
+                    SliderBar(pages: MainPage.topGroup, selection: $page)
+                    deviceCard
+                    applyButton
+                    menusCard
+                    pairingGenerateCard
+                    LockBanner()
+                    // Clearance so the lock note never hides
+                    // behind the floating bottom slider.
+                    Color.clear.frame(height: 64)
+                }
+                .padding()
+            }
+            .onChange(of: wireless.phase) { newPhase in
+                // The library wrote a fresh record to the canonical
+                // path: adopt it through the same validation an
+                // imported file gets, then start the backend the way
+                // a successful import does.
+                guard newPhase == .paired else { return }
+                adoptGeneratedPairing()
+            }
+            .onChange(of: pairingNote) { new in
+                // Transient notes only: clear after 6s so a stale
+                // message never sits on screen.
+                guard let current = new else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(6))
+                    if pairingNote == current {
+                        pairingNote = nil
+                    }
+                }
+            }
+            SliderBar(pages: MainPage.bottomGroup, selection: $page)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
+        }
     }
 
     // MARK: - Hero
@@ -131,8 +186,46 @@ struct MainMenuView: View {
             Text("\(DeviceStatus.modelOrDash) • \(DeviceInfoEx.versionWithBuild)")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            statusLine
         }
         .padding(.top, 8)
+    }
+
+    /// The build's support status, directly under the model •
+    /// version • build line (owner's design, 2026-10-22): a green
+    /// check for Supported, a yellow check for Partially Supported,
+    /// a red ! for Not Supported. The level itself is BuildSupport's
+    /// existing verdict — this row only displays it.
+    private var statusLine: some View {
+        HStack(spacing: 6) {
+            Image(systemName: BuildSupport.current == .unsupported
+                  ? "exclamationmark.circle.fill"
+                  : "checkmark.circle.fill")
+                .foregroundStyle(statusColor)
+            HStack(spacing: 0) {
+                Text("Status : ")
+                Text(statusWord)
+                    .foregroundStyle(statusColor)
+            }
+            .font(.subheadline.weight(.semibold))
+        }
+        .accessibilityIdentifier("build-status")
+    }
+
+    private var statusColor: Color {
+        switch BuildSupport.current {
+        case .supported: return .green
+        case .partial: return Color(red: 0.93, green: 0.62, blue: 0.10)
+        case .unsupported: return .red
+        }
+    }
+
+    private var statusWord: String {
+        switch BuildSupport.current {
+        case .supported: return "Supported"
+        case .partial: return "Partially Supported"
+        case .unsupported: return "Not Supported!!"
+        }
     }
 
     /// Shown only on Partially Supported builds (the iOS 27 line):
@@ -409,28 +502,6 @@ struct MainMenuView: View {
     private var menusCard: some View {
         VStack(spacing: 0) {
             Button {
-                path.append(.allTweaks)
-            } label: {
-                HStack {
-                    Label {
-                        Text("All Tweaks")
-                    } icon: {
-                        RowIcon(name: "sparkles")
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .padding(.vertical, 12)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("menu-all-tweaks")
-            Divider()
-                .padding(.leading, 46)
-            Button {
                 path.append(.settings)
             } label: {
                 HStack {
@@ -563,7 +634,7 @@ struct AboutInfoView: View {
                 Section {
                     Text("1. Get a pairing file on this screen: import one from a computer (iDevice Pair / Apple Configurator) or a pairing app — or, on iOS 27, use the Get pairing file palette below the menus and generate it on this iPhone. Without a pairing file nothing can be delivered.")
                     Text("2. Start a loopback VPN tunnel using LocalDevVPN until the VPN tunnel row above says DETECTED. This is not an internet VPN - no traffic leaves your iPhone.")
-                    Text("3. Open All Tweaks, pick a category, and stage the tweaks you want with the toggles.")
+                    Text("3. Pick a category from the sliders at the top and bottom of the Home screen, and stage the tweaks you want with the toggles.")
                     Text("4. Back on Home, tap Apply and follow the progress. When it finishes, restart your iPhone manually and check the tweaks.")
                 } header: {
                     Text("How to use")

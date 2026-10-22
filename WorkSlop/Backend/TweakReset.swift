@@ -282,6 +282,16 @@ enum TweakReset {
         var payloads: [TweakPayload] = []
         var skipped: [(label: String, reason: String)] = []
 
+        // The apply compiler mirrors the managed GlobalPreferences file
+        // into its HomeDomain copy (see TweakCompiler), so a removal
+        // that nulls only the managed file leaves every key alive in
+        // the mirror — the Liquid Glass tweaks among them. Expand the
+        // set the same way the compiler does.
+        var locations = locations
+        if locations.contains(.globalPreferences) {
+            locations.insert(.globalPreferencesHomeDomain)
+        }
+
         func append(path: String, contents: Data, kind: Kind,
                     domain: String, relativePath: String) {
             targets.append(Target(path: path, contents: contents, kind: kind))

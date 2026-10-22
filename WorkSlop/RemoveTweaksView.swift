@@ -37,6 +37,10 @@ struct RemoveTweaksView: View {
         let locations: Set<TweakFileLocation>
         let includeStatusBar: Bool
         let featureIDs: [String]
+        /// Targets for files the record never knew about (applied
+        /// before the record existed) skip the record gates — the
+        /// device gate (imported pairing + tunnel) still applies.
+        var bypassRecordGate: Bool = false
     }
 
     /// Recorded features grouped by the file a removal must null.
@@ -53,6 +57,23 @@ struct RemoveTweaksView: View {
             .map { (location: $0.key, featureIDs: $0.value.sorted()) }
             .sorted { $0.location.rawValue < $1.location.rawValue }
     }
+
+    /// Every file any catalog tweak writes to — the removal targets
+    /// for tweaks applied before the record existed (the record only
+    /// knows applies from the build that introduced it). Resetting a
+    /// file to stock is the same write whether or not a tweak was
+    /// ever applied to it, so these are always safe to offer.
+    private var allTweakLocations: [TweakFileLocation] {
+        Array(Set(TweakCatalog.allWithDaemons.map(\.location)))
+            .sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private var unrecordedLocations: [TweakFileLocation] {
+        let recorded = Set(fileGroups.map(\.location))
+        return allTweakLocations.filter { !recorded.contains($0) }
+    }
+
+    private var canRunUnrecorded: Bool { status.unlocked && !running }
 
     private var pairingMatches: Bool {
         guard let recorded = record.pairingFingerprint else { return true }
@@ -152,6 +173,44 @@ struct RemoveTweaksView: View {
                     }
                 }
 
+                if !unrecordedLocations.isEmpty {
+                    Section {
+                        ForEach(unrecordedLocations, id: \.self) { location in
+                            HStack {
+                                Text(location.rawValue)
+                                    .font(.footnote)
+                                Spacer()
+                                Button("Remove", role: .destructive) {
+                                    confirmTarget = RemoveTarget(
+                                        id: "unrecorded-" + location.rawValue,
+                                        title: "Remove any tweaks in this file",
+                                        locations: [location],
+                                        includeStatusBar: false,
+                                        featureIDs: [],
+                                        bypassRecordGate: true)
+                                }
+                                .disabled(!canRunUnrecorded)
+                            }
+                        }
+                        Button(role: .destructive) {
+                            confirmTarget = RemoveTarget(
+                                id: "unrecorded-all",
+                                title: "Remove ALL tweak files (recorded or not)",
+                                locations: Set(allTweakLocations),
+                                includeStatusBar: true,
+                                featureIDs: record.featureIDs,
+                                bypassRecordGate: true)
+                        } label: {
+                            Label("Remove all tweak files", systemImage: "trash.fill")
+                        }
+                        .disabled(!canRunUnrecorded)
+                    } header: {
+                        Text("Applied before the record?")
+                    } footer: {
+                        Text("The record only knows applies from the build that introduced it. Tweaks applied earlier still sit in these files — resetting one to stock is harmless even if nothing was applied to it. Restart the iPhone afterwards.")
+                    }
+                }
+
                 if running || !logLines.isEmpty {
                     Section("Log") {
                         ForEach(Array(logLines.enumerated()), id: \.offset) { _, line in
@@ -199,7 +258,8 @@ struct RemoveTweaksView: View {
     // MARK: - Run
 
     private func runRemove(_ target: RemoveTarget) {
-        guard canRemove, !running else { return }
+        guard !running, status.unlocked else { return }
+        guard target.bypassRecordGate || canRemove else { return }
         BackendBootstrap.start()
         running = true
         cancelling = false
