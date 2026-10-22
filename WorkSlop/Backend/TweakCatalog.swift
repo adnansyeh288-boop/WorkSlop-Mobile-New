@@ -1160,7 +1160,7 @@ enum TweakCatalog {
             disabled: false,
             detail: "Turns off the Liquid Glass exterior effects on the Home Screen. iOS 26 only: the key has no reader on iOS 27 (WorkSlop firmware audit).",
             multiValues: nil
-        ),,
+        ),
         TweakSpec(
             id: "DisableKeyboardGlassExterior",
             section: .liquidGlass,
@@ -1179,7 +1179,7 @@ enum TweakCatalog {
             disabled: false,
             detail: "Turns off the Liquid Glass exterior effects around the keyboard. iOS 26 only: the key has no reader on iOS 27 (WorkSlop firmware audit).",
             multiValues: nil
-        ),,
+        ),
         TweakSpec(
             id: "DisableSolariumFocusForegroundEffects",
             section: .liquidGlass,
@@ -1198,7 +1198,7 @@ enum TweakCatalog {
             disabled: false,
             detail: "Disables the Solarium focus foreground effects. iOS 26 only: the key has no reader on iOS 27 (WorkSlop firmware audit).",
             multiValues: nil
-        ),,
+        ),
         TweakSpec(
             id: "SolariumForceDarkShadow",
             section: .liquidGlass,
@@ -1217,7 +1217,7 @@ enum TweakCatalog {
             disabled: false,
             detail: "Forces the dark variant of the Liquid Glass shadow. iOS 26 only: the key has no reader on iOS 27 (WorkSlop firmware audit).",
             multiValues: nil
-        ),,
+        ),
         TweakSpec(
             id: "SolariumTextFrost",
             section: .liquidGlass,
@@ -1236,7 +1236,7 @@ enum TweakCatalog {
             disabled: false,
             detail: "Enables the frosted text treatment in Liquid Glass. iOS 26 only: the key has no reader on iOS 27 (WorkSlop firmware audit).",
             multiValues: nil
-        ),,
+        ),
         TweakSpec(
             id: "DisableDockGlassExterior",
             section: .liquidGlass,
@@ -1255,7 +1255,7 @@ enum TweakCatalog {
             disabled: false,
             detail: "Turns off the Liquid Glass exterior effects on the Dock. iOS 26 only: the key has no reader on iOS 27 (WorkSlop firmware audit).",
             multiValues: nil
-        ),,
+        ),
         TweakSpec(
             id: "DisableSolariumSwiftUI",
             section: .liquidGlass,
@@ -1274,7 +1274,7 @@ enum TweakCatalog {
             disabled: false,
             detail: "Asks SwiftUI to skip Solarium (Liquid Glass) rendering. Ported from the WorkSlop Desktop registry.",
             multiValues: nil
-        ),,
+        ),
         TweakSpec(
             id: "GlassLegibility",
             section: .liquidGlass,
@@ -1293,7 +1293,7 @@ enum TweakCatalog {
             disabled: false,
             detail: "Sets the UIKit glass legibility setting to 2. Ported from the WorkSlop Desktop registry.",
             multiValues: nil
-        ),,
+        ),
         TweakSpec(
             id: "SolariumCornerRadius",
             section: .liquidGlass,

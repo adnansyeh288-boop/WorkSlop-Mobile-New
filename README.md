@@ -75,6 +75,15 @@ ride the engine's unchanged delivery (see Changes from upstream).
   `SBDisallowGlassLockScreen`, `SolariumUseDisplayAngle`,
   `SolariumHighlightWhite`, `SolariumBackgroundFilter`,
   `UISolariumFloatingContentViewEnableBackgroundFills`).
+- Completion verdicts in the vendored gateway made evidence-based
+  (2026-10-22): a restore is successful when the device's own verdict is
+  ErrorCode 0 AND the host served every file the device asked for
+  (delegate errors now fail the run instead of only being logged); the
+  device's progress percent is the completion gate only when it gave no
+  verdict — a complete restore can end at 99 % when the device already
+  holds some files. The backup path now reads the device's ErrorCode
+  too, so a protective backup the device ended in error aborts the run
+  instead of letting the restore stage trust it.
 - The upstream status-bar override engine got its missing page
   (`StatusBarView`): Apply now sends the selection the page saves
   instead of an empty one.

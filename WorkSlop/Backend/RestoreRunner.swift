@@ -10,11 +10,13 @@ enum RestoreRunner {
     /// That confirmation is not "the FFI returned": `mobilebackup2_restore`
     /// raises nothing whenever the exchange ends at the protocol level, and a
     /// restore the device abandons part-way ends exactly as cleanly as one it
-    /// completes.  `IdeviceGateway.syncRestoreBackup` therefore checks the
-    /// device's own response plist AND how far its progress got, and throws
-    /// `restoreIncomplete` for anything short.  Returning a constant 0 from here
-    /// is safe only because of that check — the previous version returned 0
-    /// unconditionally, which is how a 55 % restore was reported as a success.
+    /// completes.  `IdeviceGateway.syncRestoreBackup` therefore assembles the
+    /// verdict from the device's own response plist, the host-side delegate
+    /// error count (a file the host could not serve is a file that did not
+    /// land), and — only when the device gave no verdict at all — how far its
+    /// progress got.  Returning a constant 0 from here is safe only because
+    /// of that check — the previous version returned 0 unconditionally,
+    /// which is how a 55 % restore was reported as a success.
     @discardableResult
     static func run(backupRoot: URL, sourceIdentifier: String) async throws -> Int32 {
         let minimuxer = Minimuxer.shared()
@@ -79,8 +81,9 @@ enum RestoreRunner {
         // the last 5 % STEP crossed, so "≥55%" was the most precise thing the
         // operator ever saw about a run that had in fact finished.
         let reached = progress.lastPercent
-        AppLog.write("restore verified: the device reported "
-            + (reached < 0 ? "completion (it sent no percentage)" : "\(Int(reached))%"))
+        AppLog.write("restore verified: the device confirmed completion "
+            + "(last reported progress: "
+            + (reached < 0 ? "none sent" : "\(Int(reached))%") + ")")
         return 0
     }
 }

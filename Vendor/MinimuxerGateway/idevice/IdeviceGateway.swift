@@ -3293,27 +3293,54 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI {
                     reason: "Restore did not complete: the device answered with error code \(code)"
                         + (verdict.errorDescription.map { " — \($0)" } ?? ""))
             }
-            // No error code is NOT the same as "finished".  A restore the device
-            // abandoned part-way answers without one, which is why the second,
-            // independent signal has to be checked: the device's own progress
-            // never reached the end.  Reporting success on the strength of "the
-            // FFI did not throw" is what produced a 55 % restore labelled
-            // "succeeded".
-            let reached = progressProbe.lastPercent
-            let served = ctx.servedFileCount()
-            if reached < IdeviceGateway.restoreCompletionPercent {
-                let shown = reached < 0 ? "never reported" : "\(Int(reached))%"
-                let expected = Int(IdeviceGateway.restoreCompletionPercent)
-                let verdictText = verdict.errorCode.map { "ErrorCode \($0)" } ?? "none"
+            // The verdict is assembled from the evidence, in this order:
+            //
+            // 1. A delegate error is disqualifying on its own. It means the
+            //    device asked for a file and the host answered "no" — that
+            //    file is not on the device, whatever else is true. Until now
+            //    these were only logged, so such a restore could be labelled
+            //    a success.
+            let delegateErrors = ctx.delegateErrorCount()
+            if delegateErrors > 0 {
                 throw IdeviceGatewayError(
                     .serviceError,
-                    reason: "Restore stopped short: the device ended the exchange at \(shown) "
-                        + "(a completed restore reports \(expected)%), "
-                        + "after taking \(served) file(s) from the host. "
-                        + "device verdict: \(verdictText). "
-                        + "Nothing threw, so this is not a transport failure — the device decided it was "
-                        + "done. Check what the manifest offered against what the host actually has: "
-                        + "the 'commit:' and 'delegate errors:' lines above are the host-side half.")
+                    reason: "Restore cannot be called complete: the host failed to serve "
+                        + "\(delegateErrors) file request(s) the device made (\(ctx.errorSummary())). "
+                        + "The device ended the exchange anyway, so the run is reported as failed — "
+                        + "the file(s) it could not get did not land. Fix the cause and apply again.")
+            }
+            // 2. An explicit ErrorCode 0 is the device declaring the restore
+            //    finished. Its progress figure is advisory next to that: a
+            //    device that already holds some of the offered files never
+            //    asks for them again, so the last reported percent can sit
+            //    below 100 on a restore that verifiably landed (observed in
+            //    the field: 99%, ErrorCode 0, every file present after a
+            //    restart). Failing such a run on the percent alone was a
+            //    false failure, so the gap is logged, not thrown.
+            // 3. No verdict at all: progress is the only completion signal
+            //    left, and the original guard stands — an abandoned restore
+            //    answers without an error code too, which is how a 55 %
+            //    restore once got labelled "succeeded".
+            let reached = progressProbe.lastPercent
+            let served = ctx.servedFileCount()
+            if verdict.errorCode == nil {
+                if reached < IdeviceGateway.restoreCompletionPercent {
+                    let shown = reached < 0 ? "never reported" : "\(Int(reached))%"
+                    let expected = Int(IdeviceGateway.restoreCompletionPercent)
+                    throw IdeviceGatewayError(
+                        .serviceError,
+                        reason: "Restore stopped short: the device ended the exchange at \(shown) "
+                            + "(a completed restore reports \(expected)%), "
+                            + "after taking \(served) file(s) from the host, and gave no final "
+                            + "verdict of its own. Nothing threw, so this is not a transport failure — "
+                            + "the device decided it was done. Check what the manifest offered "
+                            + "against what the host actually has: the 'commit:' and 'delegate errors:' "
+                            + "lines above are the host-side half.")
+                }
+            } else if reached >= 0, reached < IdeviceGateway.restoreCompletionPercent {
+                delegateLog?("device verdict: ErrorCode 0 — the device declares the restore complete "
+                    + "with final reported progress \(Int(reached))% (it already held the rest, so it "
+                    + "never asked). Accepted on the device's verdict.")
             }
             verboseLog("[IdeviceGateway] syncRestoreBackup() mobilebackup2_restore completed")
         }
@@ -3391,6 +3418,24 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI {
                 debugLog("[IdeviceGateway] syncBackupBackup() mobilebackup2_backup failed: \(msg)")
                 defer { idevice_error_free(err) }
                 throw IdeviceGatewayError(.serviceError, reason: "Backup failed, error: (\(msg))")
+            }
+            // The device's verdict, read before the plist is freed — the
+            // backup path never looked at it, so a backup the device ended
+            // with an error code (a commit shortfall, MBErrorDomain/104)
+            // passed as long as the FFI stayed quiet, and the restore stage
+            // then ran on top of it believing the safety net existed. An
+            // absent code stays non-fatal here: plenty of successful
+            // exchanges answer without one, and the host-side gates
+            // (kept-file count, staging check, commit accounting in the
+            // log) remain as the second signal.
+            let verdict = self.deviceVerdict(from: response)
+            delegateLog?(verdict.summaryLine)
+            if let code = verdict.errorCode, code != 0 {
+                self.safeFreePlist(response)
+                throw IdeviceGatewayError(
+                    .serviceError,
+                    reason: "Backup did not complete: the device answered with error code \(code)"
+                        + (verdict.errorDescription.map { " — \($0)" } ?? ""))
             }
             var dict: [String: Any] = [:]
             if let response = response {

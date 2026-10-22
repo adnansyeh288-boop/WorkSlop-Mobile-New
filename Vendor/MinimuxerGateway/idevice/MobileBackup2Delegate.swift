@@ -130,6 +130,16 @@ public final class MobileBackup2BackupContext: @unchecked Sendable {
         return servedFiles
     }
 
+    /// How many times a delegate callback answered the device with an
+    /// error. The restore verdict reads this: a file the device asked
+    /// for and the host could not serve is a file that is not on the
+    /// device, whatever the device's own final code says.
+    func delegateErrorCount() -> Int {
+        errorLock.lock()
+        defer { errorLock.unlock() }
+        return delegateErrors
+    }
+
     func servedSummary() -> String {
         servedLock.lock()
         let files = servedFiles
