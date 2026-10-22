@@ -1,4 +1,0 @@
-# Pinned upstream commit of Mak5er/AirCard-iOS for AirliftFFI.xcframework.
-# Bump this SHA to pull a newer prebuilt. The CI cache key derives from
-# this file, so changing it forces a re-download.
-40640c4d827aeab8d798285b57d24fcf6be070d0
