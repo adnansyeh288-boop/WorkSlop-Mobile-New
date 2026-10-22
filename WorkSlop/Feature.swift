@@ -1,16 +1,12 @@
 import Foundation
 
-/// Delivery route a tweak rides. Everything stages through the
-/// partial (sparse) restore on iOS 26; on iOS 27 everything rides
-/// a full backup -> modify -> restore with all data, exactly
-/// like the desktop. (The desktop's old Beta 1 tweaks were removed by
-/// the maintainer and do not exist here.)
+/// Delivery route a tweak rides, decided by the engine per iOS
+/// version: the partial (sparse) restore on iOS 26; on iOS 27 a
+/// protective backup is taken first, then the modified backup is
+/// restored. Every feature below stages through the same apply.
 enum DeliveryRoute: String {
     case partialRestore = "Partial restore"
-    case fullBackup = "Full backup → modify → restore"
-    /// The desktop's targeted container backup exists only for the
-    /// PosterBoard Configurations (database) mode, which mobile does
-    /// not offer; mobile PosterBoard is Descriptors = partial restore.
+    case fullBackup = "Protective backup → modify → restore"
 }
 
 /// iOS version window a feature supports. A feature is locked ONLY when
@@ -71,17 +67,9 @@ struct Feature: Identifiable {
         return max.major > 27 || (max.major == 27 && max.minor > 0)
     }
 
-    /// Full route sentence for the info sheet. Standing wording:
-    /// Partial restore tops out at iOS 26; iOS 27 is the Full
-    /// backup route.
+    /// Full route sentence for the info sheet.
     var routeSummary: String {
-        if route == .partialRestore && reachesIOS27 {
-            return "Partial restore - max iOS 26. On iOS 27 this rides Full backup \u{2192} modify \u{2192} restore."
-        }
-        if route == .partialRestore {
-            return "Partial restore - max iOS 26."
-        }
-        return "Full backup \u{2192} modify \u{2192} restore - the WorkSlop Desktop method; this is the iOS 27 route."
+        "On iOS 26 this rides the partial restore. On iOS 27 the engine takes a protective backup first, then restores the modified backup. The app never reboots the phone - restart manually afterwards."
     }
     let window: IOSWindow
 
@@ -159,7 +147,7 @@ enum ActivationGate {
             return "Locked: import the pairing file and start your VPN tunnel first."
         }
         if !pairingReady {
-            return "Locked: import the pairing file (.plist) in Settings first."
+            return "Locked: import the pairing file on the Home screen first."
         }
         return "Locked: start your VPN tunnel (LocalDevVPN loopback tunnel) first."
     }
@@ -204,7 +192,7 @@ enum DeviceStatus {
     /// interfaces carry only auto-assigned link-local, and accepting
     /// those would false-positive on phones with no real tunnel.
     /// Phase 2 — does lockdownd actually answer on the tunnel? — is
-    /// LockdownProbe.probe, run by "Refresh device status".
+    /// the DeviceIdentity read in StatusStore.refresh.
     static func vpnTunnelActive() -> Bool {
         var addrs: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&addrs) == 0, let first = addrs else { return false }
@@ -289,21 +277,16 @@ final class SelectionStore: ObservableObject {
 }
 
 enum FeatureCatalog {
-    /// Solarium exists only on iOS 26; the desktop registry gives the
-    /// Liquid Glass set min 26.0 and no max, so the window has none.
-    private static let ios26 = IOSWindow(min: (26, 0), maxExclusive: nil)
-    /// Desktop overall support line (is_version_supported): 16.0–<27.0.
-    private static let ios16to26 = IOSWindow(min: (16, 0), maxExclusive: (27, 0))
-    private static let ios26_0 = IOSWindow(min: (26, 0), maxExclusive: nil) // registry min only
-    /// Classic binary statusBarOverrides is dead on iOS 27 (desktop-verified:
-    /// "the classic binary statusBarOverrides file is dead" — only carrier
-    /// text survives via StatusBarOverrides.archive). Gate the classic
-    /// overrides to iOS 26.x so iOS 27 shows an honest "unsupported" chip.
-    private static let ios26xOnly = IOSWindow(min: (26, 0), maxExclusive: (27, 0))
+    /// The engine's support line: iOS 26+. Per-tweak version bounds
+    /// are the GN specs' own min/max — the rows read them through
+    /// GNMapping.availability and the compiler re-checks them at
+    /// apply time. This window is only the fallback for the spec-less
+    /// PosterBoard features.
+    private static let gnLine = IOSWindow(min: (26, 0), maxExclusive: nil)
 
     /// Draws tweak titles and the keys actually written from the desktop
-    /// registry (sections Liquid Glass, SpringBoard, Internal Options)
-    /// plus the desktop Status Bar and Custom Icons pages. It is a
+    /// registry (sections Liquid Glass, SpringBoard, Internal Options).
+    /// It is a
     /// subset of the desktop catalog, not a full mirror: rows the
     /// maintainer removed are absent. Subtitles name the plist key (or
     /// file target) each toggle stages. The desktop "Feature Flags"
@@ -312,142 +295,131 @@ enum FeatureCatalog {
     /// not offered here.
     static let all: [Feature] = [
         // --- Liquid Glass (regular set, partial restore) ---
-        Feature(id: "lg-legibility-2", title: "Glass Legibility Value 2",
-                subtitle: "UIViewGlassLegibilitySetting = 2", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
         Feature(id: "lg-disallow-clock", title: "Disallow Glass on LS Clock",
                 subtitle: "SBDisallowGlassTime", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-disable-dock", title: "Disable Glass on Dock",
                 subtitle: "SBDisableGlassDock", section: "Liquid Glass",
-                route: .partialRestore, window: ios26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-flat-icons", title: "Flat Icons Everywhere",
                 subtitle: "SBUseFlatIconsEverywhere", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-disable-widget-specular", title: "Disable Widget Specular",
                 subtitle: "SBDisableWidgetSpecular", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-disable-dock-specular", title: "Disable Dock Specular",
                 subtitle: "SBDisableDockSpecular", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-disable-folder-specular", title: "Disable Folder Specular",
                 subtitle: "SBDisableFolderSpecular", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-exclude-clear-shadows", title: "Exclude Clear Glass Shadows",
                 subtitle: "SBExcludeAllClearGlassShadows", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-disable-refraction", title: "Disable Outer Refraction",
                 subtitle: "SolariumDisableOuterRefraction", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-disable-hdr", title: "Disable Solarium HDR",
                 subtitle: "SolariumAllowHDR = false", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-disable-specular-motion", title: "Disable Specular Motion",
                 subtitle: "SBDisableSpecularEverywhereUsingLSSAssertion", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-disable-specular-everywhere", title: "Disable Specular Everywhere",
                 subtitle: "SBDisableSpecularEverywhere", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
+                route: .partialRestore, window: gnLine),
         Feature(id: "lg-blurr-motion", title: "Blurr Motion",
                 subtitle: "SolariumIncreasedDiffusion", section: "Liquid Glass",
-                route: .partialRestore, window: ios26xOnly),
+                route: .partialRestore, window: gnLine),
 
         // --- SpringBoard (desktop SpringBoard section) ---
         Feature(id: "sb-watchos-pairing", title: "Allow pairing with any watchOS version",
                 subtitle: "NanoRegistry pairing flag (no plist key)", section: "SpringBoard",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "sb-dont-lock-crash", title: "Disable Lock After Respring",
                 subtitle: "SBDontLockAfterCrash", section: "SpringBoard",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "sb-dont-dim-ac", title: "Disable Screen Dimming While Charging",
                 subtitle: "SBDontDimOrLockOnAC", section: "SpringBoard",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "sb-hide-low-power", title: "Disable Low Battery Alerts",
                 subtitle: "SBHideLowPowerAlerts", section: "SpringBoard",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "sb-hide-ac-power", title: "Hide AC Power on Lock Screen",
                 subtitle: "SBHideACPower", section: "SpringBoard",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "sb-never-breadcrumb", title: "Disable Breadcrumbs",
                 subtitle: "SBNeverBreadcrumb", section: "SpringBoard",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "sb-supervision-text", title: "Show Supervision Text on Lock Screen",
                 subtitle: "SBShowSupervisionTextOnLockScreen", section: "SpringBoard",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "sb-icon-parallax", title: "Disable Icon Parallax",
                 subtitle: "SBDisableParallax", section: "SpringBoard",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         // --- Daemons (disabled.plist, partial restore) ---
         Feature(id: "dm-recommended",
                 title: "Recommended (analytics, tracking & logging)",
-                subtitle: "One switch on desktop: the safe analytics/telemetry disable set - 23 daemon groups, 63 labels.",
-                section: "Recommended", route: .partialRestore, window: ios16to26),
+                subtitle: "One switch: the safe analytics/telemetry disable set - 23 daemon groups, 66 labels.",
+                section: "Recommended", route: .partialRestore, window: gnLine),
         Feature(id: "dm-clear-screentime",
                 title: "Clear ScreenTimeAgent.plist file",
                 subtitle: "Empties com.apple.ScreenTimeAgent.plist; ScreenTimeAgent rebuilds it.",
-                section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-thermalmonitord", title: "Disable thermalmonitord", subtitle: "com.apple.thermalmonitord", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-ota", title: "Disable OTA", subtitle: "com.apple.mobile.softwareupdated + 3 more", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-usagetrackingagent", title: "Disable UsageTrackingAgent", subtitle: "com.apple.UsageTrackingAgent", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-gamecenter", title: "Disable Game Center", subtitle: "com.apple.gamed", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-atwakeup", title: "Disable ATWAKEUP", subtitle: "com.apple.atc.atwakeup", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-tips", title: "Disable Tips Services", subtitle: "com.apple.tipsd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-vpn", title: "VPN Icon", subtitle: "com.apple.racoon", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-chineselan", title: "Disable Chinese WLAN Service", subtitle: "com.apple.wapic + 1 more", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-healthkit", title: "Disable HealthKit", subtitle: "com.apple.healthd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-airprint", title: "Disable AirPrint", subtitle: "com.apple.printd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-assistivetouch", title: "Disable Assistive Touch", subtitle: "com.apple.assistivetouchd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-icloud", title: "Disable iCloud", subtitle: "com.apple.itunescloudd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-passbook", title: "Disable Passbook", subtitle: "com.apple.passd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-spotlight", title: "Disable Spotlight", subtitle: "com.apple.searchd + 4 more", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-nanotimekit", title: "Disable NanoTimeKit (Apple Watch Face Sync)", subtitle: "com.apple.nanotimekitcompaniond", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-voicecontrol", title: "Disable Voice Control", subtitle: "com.apple.assistant_service + 2 more", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-followup", title: "Follow Up", subtitle: "com.apple.followupd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-wifianalytics", title: "Disable Wi-Fi Analytics", subtitle: "com.apple.wifianalyticsd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-analyticshelper", title: "Disable System Analytics", subtitle: "com.apple.analyticsd + 2 more", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-callanalytics", title: "Disable Call Analytics (RTC Reporting)", subtitle: "com.apple.rtcreportingd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-coreduet", title: "Disable CoreDuet (Battery/Usage Statistics)", subtitle: "com.apple.coreduetd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-insight", title: "Disable Insight", subtitle: "com.apple.insightd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-metrics", title: "Disable Metrics", subtitle: "com.apple.metricsd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-mediaexperience", title: "Disable Media Experience Analytics", subtitle: "com.apple.mediaremoted", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-symptomsd", title: "Disable Symptom Diagnostics", subtitle: "com.apple.symptomsd + 1 more", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-statisticaldiagnostic", title: "Disable Statistical Diagnostics", subtitle: "com.apple.StatisticalDiagnosticService", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-wirelessdiagnostics", title: "Disable Wireless Diagnostics", subtitle: "com.apple.wirelessdiagnostics", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-duetheuristic", title: "Disable Duet Heuristic", subtitle: "com.apple.DuetHeuristic-BM + 1 more", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-duetexpert", title: "Disable Duet Expert", subtitle: "com.apple.duetexpertd", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-decisiond", title: "Disable Decisiond", subtitle: "com.apple.decisiond", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-triald", title: "Disable Triald (A/B Experiment Telemetry)", subtitle: "com.apple.triald", section: "Daemons", route: .partialRestore, window: ios16to26),
-        Feature(id: "dm-sociald", title: "Disable Sociald", subtitle: "com.apple.sociald", section: "Daemons", route: .partialRestore, window: ios16to26),
+                section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-thermalmonitord", title: "Disable thermalmonitord", subtitle: "com.apple.thermalmonitord", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-ota", title: "Disable OTA", subtitle: "com.apple.mobile.softwareupdated + 3 more", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-usagetrackingagent", title: "Disable UsageTrackingAgent", subtitle: "com.apple.UsageTrackingAgent", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-gamecenter", title: "Disable Game Center", subtitle: "com.apple.gamed", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-atwakeup", title: "Disable ATWAKEUP", subtitle: "com.apple.atc.atwakeup", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-tips", title: "Disable Tips Services", subtitle: "com.apple.tipsd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-vpn", title: "VPN Icon", subtitle: "com.apple.racoon", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-chineselan", title: "Disable Chinese WLAN Service", subtitle: "com.apple.wapic + 1 more", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-healthkit", title: "Disable HealthKit", subtitle: "com.apple.healthd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-airprint", title: "Disable AirPrint", subtitle: "com.apple.printd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-assistivetouch", title: "Disable Assistive Touch", subtitle: "com.apple.assistivetouchd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-icloud", title: "Disable iCloud", subtitle: "com.apple.itunescloudd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-passbook", title: "Disable Passbook", subtitle: "com.apple.passd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-spotlight", title: "Disable Spotlight", subtitle: "com.apple.searchd + 4 more", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-nanotimekit", title: "Disable NanoTimeKit (Apple Watch Face Sync)", subtitle: "com.apple.nanotimekitcompaniond", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-voicecontrol", title: "Disable Voice Control", subtitle: "com.apple.assistant_service + 2 more", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-followup", title: "Follow Up", subtitle: "com.apple.followupd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-wifianalytics", title: "Disable Wi-Fi Analytics", subtitle: "com.apple.wifianalyticsd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-analyticshelper", title: "Disable System Analytics", subtitle: "com.apple.analyticsd + 2 more", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-callanalytics", title: "Disable Call Analytics (RTC Reporting)", subtitle: "com.apple.rtcreportingd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-coreduet", title: "Disable CoreDuet (Battery/Usage Statistics)", subtitle: "com.apple.coreduetd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-insight", title: "Disable Insight", subtitle: "com.apple.insightd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-metrics", title: "Disable Metrics", subtitle: "com.apple.metricsd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-mediaexperience", title: "Disable Media Experience Analytics", subtitle: "com.apple.mediaremoted", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-symptomsd", title: "Disable Symptom Diagnostics", subtitle: "com.apple.symptomsd + 1 more", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-statisticaldiagnostic", title: "Disable Statistical Diagnostics", subtitle: "com.apple.StatisticalDiagnosticService", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-wirelessdiagnostics", title: "Disable Wireless Diagnostics", subtitle: "com.apple.wirelessdiagnostics", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-duetheuristic", title: "Disable Duet Heuristic", subtitle: "com.apple.DuetHeuristic-BM + 1 more", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-duetexpert", title: "Disable Duet Expert", subtitle: "com.apple.duetexpertd", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-decisiond", title: "Disable Decisiond", subtitle: "com.apple.decisiond", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-triald", title: "Disable Triald (A/B Experiment Telemetry)", subtitle: "com.apple.triald", section: "Daemons", route: .partialRestore, window: gnLine),
+        Feature(id: "dm-sociald", title: "Disable Sociald", subtitle: "com.apple.sociald", section: "Daemons", route: .partialRestore, window: gnLine),
 
         // --- Internal Options (desktop Internal section) ---
         Feature(id: "in-build-version", title: "Show Build Version in Status Bar",
                 subtitle: "UIStatusBarShowBuildVersion", section: "Internal Options",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "in-rtl", title: "Force Right-to-Left Layout",
                 subtitle: "NSForceRightToLeftWritingDirection", section: "Internal Options",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "in-ltr", title: "Force Left-to-Right Layout",
                 subtitle: "NSForceLeftToRightWritingDirection", section: "Internal Options",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "in-disable-thermal", title: "Disable Thermal",
                 subtitle: "com.apple.thermalmonitord (disabled.plist)", section: "Internal Options",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
         Feature(id: "in-hidden-icons", title: "Show Hidden Icons on Home Screen",
                 subtitle: "SBIconVisibility", section: "Internal Options",
-                route: .partialRestore, window: ios16to26),
+                route: .partialRestore, window: gnLine),
 
         // --- PosterBoard (desktop PosterBoard page) ---
-        Feature(id: "pb-tendies", title: "Tendies wallpapers (.tendies)", subtitle: "AppDomain-com.apple.PosterBoard / PRBPosterExtensionDataStore (max 5 files per restore, 10 descriptors)", section: "PosterBoard", route: .partialRestore, window: ios16to26),
-        Feature(id: "pb-reset", title: "Reset PosterBoard", subtitle: "Clears delivered descriptors; PosterBoard rebuilds itself", section: "PosterBoard", route: .partialRestore, window: ios16to26),
+        Feature(id: "pb-tendies", title: "Tendies wallpapers (.tendies)", subtitle: "AppDomain-com.apple.PosterBoard / PRBPosterExtensionDataStore (max 5 files per restore, 10 descriptors)", section: "PosterBoard", route: .partialRestore, window: gnLine),
+        Feature(id: "pb-reset", title: "Reset PosterBoard", subtitle: "Clears delivered descriptors; PosterBoard rebuilds itself", section: "PosterBoard", route: .partialRestore, window: gnLine),
 
-        // --- Custom Icons (desktop Custom Icons page) ---
-        Feature(
-            id: "custom-icons",
-            title: "Custom Icons",
-            subtitle: "Icon themes & custom app icons",
-            section: "Custom Icons",
-            route: .partialRestore,
-            window: ios16to26),
     ]
 
     /// Features grouped once at first use (order within each

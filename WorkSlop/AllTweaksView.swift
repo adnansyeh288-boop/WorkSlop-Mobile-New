@@ -5,7 +5,7 @@ import SwiftUI
 struct AllTweaksView: View {
     private let groups: [TweakGroup] = [
         TweakGroup(id: "Liquid Glass", icon: "sparkles",
-                   footer: "Partial restore on iOS 26, Full backup → modify → restore on iOS 27 - the same split as desktop."),
+                   footer: "Partial restore on iOS 26; on iOS 27 a protective backup is taken first, then the modified backup is restored."),
         TweakGroup(id: "SpringBoard", icon: "square.grid.2x2", footer: nil),
         TweakGroup(id: "Daemons", icon: "gearshape.2",
                    footer: "Daemon toggles stage the same disabled-daemons list the desktop manages."),
@@ -13,9 +13,6 @@ struct AllTweaksView: View {
                    footer: "The desktop one-tap Recommended analytics set, as individual switches."),
         TweakGroup(id: "Apple Internal", icon: "hammer", footer: nil),
         TweakGroup(id: "PosterBoard", icon: "rectangle.on.rectangle", footer: nil),
-        TweakGroup(id: "Custom Icons", icon: "app.dashed", footer: nil),
-        TweakGroup(id: "AirFlit", icon: "creditcard",
-                   footer: "Passcode themes + Wallet card images via the AirCard method (AirTraffic). iOS 18.0 – 27.2 beta 2 only."),
     ]
 
     var body: some View {
@@ -24,11 +21,7 @@ struct AllTweaksView: View {
             List {
                 ForEach(groups) { group in
                     NavigationLink {
-                        if group.id == "AirFlit" {
-                            AirFlitView()
-                        } else {
-                            TweakListView(group: group)
-                        }
+                        TweakListView(group: group)
                     } label: {
                         HStack {
                             Label {
@@ -65,84 +58,41 @@ struct TweakGroup: Identifiable, Hashable {
     }
 
     var count: Int {
-        switch id {
-        case "Custom Icons": return IOS18IconCatalog.tintedIcons.count + CustomIconStore.load().count
-        case "PosterBoard": return FeatureCatalog.features(in: "PosterBoard").count
-        case "AirFlit": return 2 // Passcode Theme + Wallet Image
-        default: return FeatureCatalog.features(in: catalogSection).count
-        }
+        FeatureCatalog.features(in: catalogSection).count
     }
 }
 
 /// The tweak options of one group: plain toggles, never sliders.
 struct TweakListView: View {
     let group: TweakGroup
-    // Shared app-wide stage (owned by ContentView): icons staged here
-    // are visible to ApplyView's gate, so icons alone enable Apply.
-    @EnvironmentObject private var iconStage: IconStage
 
     var body: some View {
         ZStack {
             SkyBackground()
             List {
-                if group.id == "Custom Icons" {
-                    customIcons
-                } else {
-                    Section {
-                        ForEach(FeatureCatalog.features(in: group.catalogSection)) { feature in
-                            FeatureToggleRow(feature: feature)
-                        }
-                        if group.id == "PosterBoard" {
-                            NavigationLink {
-                                PosterBoardFilesView()
-                            } label: {
-                                Label {
-                                    Text("PosterBoard files")
-                                } icon: {
-                                    RowIcon(name: "rectangle.on.rectangle")
-                                }
-                            }
-                            .accessibilityIdentifier("nav-posterboard-files")
-                        }
-                    } footer: {
-                        if let footer = group.footer { Text(footer) }
+                Section {
+                    ForEach(FeatureCatalog.features(in: group.catalogSection)) { feature in
+                        FeatureToggleRow(feature: feature)
                     }
+                    if group.id == "PosterBoard" {
+                        NavigationLink {
+                            PosterBoardFilesView()
+                        } label: {
+                            Label {
+                                Text("PosterBoard files")
+                            } icon: {
+                                RowIcon(name: "rectangle.on.rectangle")
+                            }
+                        }
+                        .accessibilityIdentifier("nav-posterboard-files")
+                    }
+                } footer: {
+                    if let footer = group.footer { Text(footer) }
                 }
             }
             .scrollContentBackground(.hidden)
         }
         .navigationTitle(group.id)
         .navigationBarTitleDisplayMode(.inline)
-    }
-
-    // MARK: - Custom Icons (Your Icons + iOS 18 galleries)
-
-    private var customIcons: some View {
-        Group {
-            YourIconsSection()
-            Section {
-                ForEach(IOS18IconCatalog.lightIcons) { icon in
-                    GalleryRow(icon: icon, variant: .light)
-                }
-            } header: {
-                Text("Light")
-            }
-            Section {
-                ForEach(IOS18IconCatalog.darkIcons) { icon in
-                    GalleryRow(icon: icon, variant: .dark)
-                }
-            } header: {
-                Text("Dark")
-            }
-            Section {
-                ForEach(IOS18IconCatalog.tintedIcons) { icon in
-                    GalleryRow(icon: icon, variant: .tinted)
-                }
-            } header: {
-                Text("Tinted")
-            } footer: {
-                Text("Official iOS 18 icon pack by catwithabaloon (v2.0), shipped byte-identical from WorkSlop Desktop v15.")
-            }
-        }
     }
 }

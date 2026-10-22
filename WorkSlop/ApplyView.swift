@@ -1,95 +1,76 @@
 import SwiftUI
 
-/// Apply: the real thing. Preflight checks, the user's Find My
-/// attestation, then the on-device restore engine:
+/// Apply: the real thing. Preflight checks, then the GoldenNugget
+/// engine runs the staged selection in one pass:
 ///
-/// - iOS 27+: full backup → payload → modify → restore → restart.
-/// - iOS 26 and below: partial (sparse) restore, no wipe.
+/// - iOS 26: partial (sparse) restore, no wipe.
+/// - iOS 27+: a protective backup of all data first, then the
+///   modified backup is restored. The engine never reboots the
+///   phone — the user restarts manually afterwards.
 ///
-/// Nothing here is a preview: progress comes from the engine's
-/// RestoreProgress ticks, and success is only reported when the
-/// device confirms.
+/// Progress, ETA and log lines all come from the engine's own
+/// callbacks; success is only reported when the engine's run
+/// returns without throwing.
 ///
-/// Cancel is REAL, not UI-only: the Cancel button cancels the Swift
-/// Task running the engine AND sets the engine's cancel flag. The
-/// transport disconnects the device socket on cancellation, unblocking
-/// hung reads — after cancel, no background work survives (this is the
-/// fix for runs that kept going after the user asked them to stop).
+/// Cancel is the engine's cancel flag: the run stops at its next
+/// checkpoint. A restore already in flight may finish or stop
+/// part-way — the result text says so instead of pretending the
+/// cancel was instant or total.
 struct ApplyView: View {
     @EnvironmentObject private var status: StatusStore
     @EnvironmentObject private var selection: SelectionStore
-    @EnvironmentObject private var iconStage: IconStage
 
-    @State private var findMyOff = false
-    @State private var riskAccepted = false
-    @State private var backupPassword = ""
     @State private var running = false
     @State private var cancelling = false
-    @State private var progress: RestoreProgress?
+    /// Whole percent 0–100 from the engine; nil when it has not
+    /// reported yet (it reports NaN when a run's progress clears).
+    @State private var progressPercent: Double?
+    @State private var etaText = ""
     @State private var logLines: [String] = []
     @State private var lastLoggedPercent = -1
     @State private var result: ApplyResult?
     @State private var showRestartSheet = false
-    /// The live run's task — stored so Cancel can REALLY stop it.
     @State private var applyTask: Task<Void, Never>?
 
     private enum ApplyResult {
         case succeeded
         case failed(String)
-        /// Cancelled before the device was written: nothing changed.
-        case cancelled(phaseName: String)
-        /// Cancelled while the restore push was in flight: the device
-        /// may hold partial changes — re-running Apply completes them.
-        case cancelledDuringRestore(phaseName: String)
-    }
-
-    /// The iOS 27 full method needs the explicit bootloop-risk acceptance;
-    /// the engine fail-closes without it.
-    private var needsRiskAcceptance: Bool {
-        DeviceInfo.iosVersion.major >= 27
+        case cancelled
     }
 
     var body: some View {
         List {
             Section {
-                preflightRow("Tweaks staged", ok: !effectiveStaged.isEmpty,
-                             detail: "\(selection.staged.count + (hasStagedIcons ? 1 : 0))")
+                preflightRow("Tweaks staged", ok: !selection.staged.isEmpty,
+                             detail: "\(selection.staged.count)")
                 preflightRow("Pairing file imported", ok: status.pairingImported, detail: nil)
                 preflightRow("VPN tunnel detected", ok: status.vpnDetected, detail: nil)
-                Toggle("Find My is OFF on this iPhone", isOn: $findMyOff)
-                    .accessibilityIdentifier("findmy-attest")
-                if needsRiskAcceptance {
-                    Text(G1Support.riskWarningText)
-                        .font(.footnote)
-                        .foregroundStyle(Color.red)
-                    Toggle("I accept the full risk (iOS 27)", isOn: $riskAccepted)
-                        .accessibilityIdentifier("risk-accept")
-                }
-                SecureField("Backup password (only if the backup is encrypted)", text: $backupPassword)
-                    .accessibilityIdentifier("backup-password")
-                    .disabled(running)
             } header: {
                 Text("Preflight")
             } footer: {
                 Text(routeText)
             }
 
-            if running, let progress {
+            if running {
                 Section(cancelling ? "Cancelling…" : "Running") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("\(Int(progress.fraction * 100))%")
+                            Text(progressPercent.map { "\(Int($0))%" } ?? "—")
                                 .font(.title2.weight(.bold))
                                 .monospacedDigit()
                             Spacer()
-                            Text(cancelling ? "Stopping…" : progress.phase.displayName)
+                            Text(cancelling ? "Stopping…" : (etaText.isEmpty ? "Working…" : etaText))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        ProgressView(value: progress.fraction)
+                        if let progressPercent {
+                            ProgressView(value: progressPercent, total: 100)
+                        } else {
+                            ProgressView()
+                        }
                         Text(cancelling
-                             ? "Cancel requested — closing device connections…"
-                             : progress.message)
+                             ? "Cancel requested — the engine stops at its next checkpoint…"
+                             : "Progress and log lines come straight from the engine.")
                             .font(.subheadline)
                     }
                     .padding(.vertical, 4)
@@ -124,7 +105,7 @@ struct ApplyView: View {
                     case .succeeded:
                         Label("Sent - restart your iPhone manually", systemImage: "checkmark.circle")
                             .foregroundStyle(Color.green)
-                        Text("The device confirmed the restore. Reboot from Settings → General → Shut Down, then verify the tweaks.")
+                        Text("The engine finished and the device confirmed the restore. Reboot from Settings → General → Shut Down, then verify the tweaks.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     case .failed(let message):
@@ -133,16 +114,10 @@ struct ApplyView: View {
                         Text(message)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                    case .cancelled(let phaseName):
+                    case .cancelled:
                         Label("Cancelled", systemImage: "stop.circle")
                             .foregroundStyle(Color.orange)
-                        Text("Stopped during \(phaseName) before anything was written to the device. All connections are closed — nothing is running in the background.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    case .cancelledDuringRestore(let phaseName):
-                        Label("Cancelled during restore", systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(Color.orange)
-                        Text("Stopped during \(phaseName). The device may hold partial changes — re-run Apply to complete them. All connections are closed — nothing is running in the background.")
+                        Text("The engine stopped at a checkpoint after your cancel request. If a restore was already in flight it may have finished or stopped part-way — re-run Apply to complete the changes, and restart your iPhone afterwards either way.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -168,7 +143,7 @@ struct ApplyView: View {
                 }
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Cancel stops the run for real: the task is cancelled, device connections are closed, and no background work continues. If cancelled during Restore, re-run Apply to complete the changes.")
+                    Text("Cancel asks the engine to stop at its next checkpoint. If cancelled while a restore is in flight, re-run Apply to complete the changes.")
                     Text("IMPORTANT: if Cancel does not respond or the app hangs, you MUST fully close WorkSlop (swipe it away from the app switcher). If the problem persists, restart your iPhone manually (Settings → General → Shut Down). This is required to keep your device safe.")
                 }
                 .font(.footnote)
@@ -184,7 +159,7 @@ struct ApplyView: View {
                         Label("Apply complete", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(Color.green)
                             .font(.headline)
-                        Text("The device confirmed every phase. Now restart your iPhone so SpringBoard picks up the new files.")
+                        Text("The engine finished and the device confirmed the restore. Now restart your iPhone so SpringBoard picks up the new files.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -195,7 +170,7 @@ struct ApplyView: View {
                         Label("After reboot, check that your tweaks are active", systemImage: "4.circle")
                     }
                     Section {
-                        Text("If a tweak didn't take effect, re-run Apply — the engine re-sends only what's needed.")
+                        Text("If a tweak didn't take effect, re-run Apply — it sends the full staged set again.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -209,38 +184,18 @@ struct ApplyView: View {
                 }
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - State
 
-    /// Custom icons with a bundle ID count as staged: they are
-    /// delivered by the same restore payload, so icons alone (no
-    /// other tweak toggled) are enough to enable Apply.
-    private var hasStagedIcons: Bool {
-        iconStage.entries.contains { !$0.bundleID.isEmpty }
-    }
-
-    /// The feature IDs actually sent to the engine: the toggled
-    /// tweaks plus "custom-icons" when icons are staged. The ID is
-    /// injected into the request only (never persisted into
-    /// SelectionStore) so the payload builder's custom-icons gate
-    /// fires and the engine's nothing-staged guard passes.
-    private var effectiveStaged: Set<String> {
-        var ids = selection.staged
-        if hasStagedIcons { ids.insert("custom-icons") }
-        return ids
-    }
-
     private var canStart: Bool {
-        status.unlocked && !effectiveStaged.isEmpty && findMyOff
-            && (!needsRiskAcceptance || riskAccepted)
+        status.unlocked && !selection.staged.isEmpty
     }
 
     private var routeText: String {
         let major = DeviceInfo.iosVersion.major
         if major >= 27 {
-            return "This device runs iOS \(major): full backup → payload → modify → restore, then restart."
+            return "This device runs iOS \(major): protective backup → modify → restore, then restart manually."
         }
         return "This device runs iOS \(major): partial (sparse) restore, no wipe."
     }
@@ -260,105 +215,104 @@ struct ApplyView: View {
 
     private func startApply() {
         guard canStart, !running else { return }
-        guard let version = DeviceVersion(DeviceInfoEx.fullVersion) else {
-            result = .failed("Could not read this device's iOS version - refusing to guess.")
-            return
-        }
+        // Make sure the connection bootstrap has had its chance: it
+        // is a no-op when the core is already up.
+        BackendBootstrap.start()
+
+        let input = GNSelectionBuilder.build(staged: selection.staged)
         running = true
         cancelling = false
         result = nil
-        progress = nil
+        progressPercent = nil
+        etaText = ""
         lastLoggedPercent = -1
         logLines = ["[WorkSlop] Apply started — iOS \(DeviceInfoEx.fullVersion) (\(DeviceInfoEx.buildNumber))"]
-        let request = RestoreRequest(
-            deviceVersion: version,
-            stagedFeatureIDs: effectiveStaged,
-            findMyDisabledAttested: findMyOff,
-            deviceLabel: "device",
-            backupPassword: backupPassword.isEmpty ? nil : backupPassword,
-            deviceBuild: DeviceInfoEx.buildNumber,
-            riskWarningAccepted: riskAccepted
-        )
-        // The task handle is stored so Cancel can REALLY stop it:
-        // applyTask.cancel() trips Task.isCancelled inside every phase
-        // and transport loop, and the transport disconnects the device
-        // socket on cancellation. Nothing survives in the background.
-        applyTask = Task {
-            do {
-                // The engine's progress closure is @Sendable; marking ours
-                // @MainActor makes it Sendable (global-actor-isolated
-                // closures are always safe to share) and keeps the @State
-                // write on the main thread.
-                try await RestoreEngine.shared.start(
-                    request: request,
-                    onProgress: { @MainActor p in
-                        self.progress = p
-                        let pct = Int(p.fraction * 100)
-                        // Throttle the log: one line per percent point, not
-                        // per tick — a full backup emits thousands of ticks
-                        // and the log must not grow without bound.
-                        if pct != self.lastLoggedPercent {
-                            self.lastLoggedPercent = pct
-                            self.logLines.append("[\(pct)%] [\(p.phase.displayName)] \(p.message)")
-                        }
+        for name in input.tendieFailures {
+            logLines.append("[WorkSlop] Skipped unreadable .tendies file: \(name)")
+        }
+        if !input.droppedFeatureIDs.isEmpty {
+            logLines.append("[WorkSlop] Not delivered (no longer offered): \(input.droppedFeatureIDs.joined(separator: ", "))")
+        }
+        guard input.mappedFeatures > 0 else {
+            running = false
+            result = .failed("None of the staged tweaks exist in the current engine — nothing was sent. Unstage them and pick from the current list.")
+            return
+        }
+
+        let engine = GoldenNuggetEngine.shared
+        engine.onLog = { line in
+            DispatchQueue.main.async {
+                logLines.append(line)
+            }
+        }
+        engine.onProgress = { percent in
+            DispatchQueue.main.async {
+                if percent.isNaN {
+                    progressPercent = nil
+                } else {
+                    progressPercent = percent
+                    let pct = Int(percent)
+                    if pct != lastLoggedPercent {
+                        lastLoggedPercent = pct
+                        logLines.append("[\(pct)%]")
                     }
-                )
-                await MainActor.run {
-                    self.applyTask = nil
-                    self.running = false
-                    self.cancelling = false
-                    self.logLines.append("[100%] Done — all phases confirmed by the device.")
-                    self.result = .succeeded
-                    self.showRestartSheet = true
                 }
-            } catch is CancellationError {
-                await MainActor.run { self.finishCancelled() }
-            } catch let error as RestoreError {
+            }
+        }
+        engine.onEta = { eta in
+            DispatchQueue.main.async { etaText = eta }
+        }
+
+        applyTask = Task {
+            // The engine wants the device's own version line: read it
+            // from lockdownd when the connection is up, and fall back
+            // to this phone's system version (the device IS this
+            // phone) when it is not.
+            let identity = await DeviceIdentity.read()
+            let version = identity.version.isEmpty ? DeviceInfoEx.fullVersion : identity.version
+            let isIPhone = identity.productType.isEmpty
+                ? DeviceStatus.model.hasPrefix("iPhone")
+                : identity.isIPhone
+            do {
+                try await engine.applyTweaks(selection: input.selection,
+                                             posterBoard: input.posterBoard,
+                                             statusBar: StatusBarSelection(),
+                                             deviceVersion: version,
+                                             isIPhone: isIPhone)
                 await MainActor.run {
-                    if case .cancelled = error {
-                        self.finishCancelled()
-                    } else {
-                        self.applyTask = nil
-                        self.running = false
-                        self.cancelling = false
-                        self.result = .failed(error.localizedDescription)
-                    }
+                    finishRun()
+                    logLines.append("[100%] Done — the engine finished and the device confirmed.")
+                    result = .succeeded
+                    showRestartSheet = true
                 }
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 await MainActor.run {
-                    self.applyTask = nil
-                    self.running = false
-                    self.cancelling = false
-                    self.result = .failed(message)
+                    let wasCancelling = cancelling
+                    finishRun()
+                    result = wasCancelling ? .cancelled : .failed(message)
                 }
             }
         }
     }
 
-    /// REAL cancel — not UI-only. Cancels the Swift Task (trips
-    /// Task.isCancelled in every phase and transport loop, and the
-    /// transport disconnects the device socket so hung reads unblock)
-    /// and sets the engine's cancel flag as a backstop. The run stops;
-    /// nothing keeps going in the background.
+    /// Sets the engine's cancel flag. The run stops at the engine's
+    /// next checkpoint and the awaiting call throws, which lands in
+    /// the cancelled result — the button does not fake an instant stop.
     private func cancelApply() {
         guard running, !cancelling else { return }
         cancelling = true
-        logLines.append("[WorkSlop] Cancel requested — stopping the run and closing device connections…")
-        applyTask?.cancel()
-        Task { await RestoreEngine.shared.cancel() }
+        logLines.append("[WorkSlop] Cancel requested — the engine stops at its next checkpoint…")
+        GoldenNuggetEngine.shared.requestCancel()
     }
 
-    /// Honest cancel report: names the phase that was active and whether
-    /// the device may have been written, so the user knows exactly what
-    /// to do next.
-    private func finishCancelled() {
-        let phaseName = progress?.phase.displayName ?? "startup"
-        let wasRestore = progress?.phase == .restore
+    private func finishRun() {
         applyTask = nil
         running = false
         cancelling = false
-        logLines.append("[WorkSlop] Cancelled during \(phaseName) — all connections closed, no background work remains.")
-        result = wasRestore ? .cancelledDuringRestore(phaseName: phaseName) : .cancelled(phaseName: phaseName)
+        let engine = GoldenNuggetEngine.shared
+        engine.onLog = nil
+        engine.onProgress = nil
+        engine.onEta = nil
     }
 }

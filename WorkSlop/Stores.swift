@@ -27,62 +27,18 @@ final class StatusStore: ObservableObject {
         probing = true
         vpnDetected = DeviceStatus.vpnTunnelActive()
         pairingImported = PairingStore.isImported
-        LockdownProbe.probe { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.probing = false
-            }
+        Task { [weak self] in
+            // Phase 2 of the two-phase check: does lockdownd answer
+            // through the tunnel? The read's verdict is not a gate
+            // input (the gate is pairing + tunnel) - it ends the
+            // probing state, as the old LockdownProbe call did.
+            _ = await DeviceIdentity.read()
+            await MainActor.run { self?.probing = false }
         }
     }
 
     /// Called after import/delete so the rows update without a refresh.
     func pairingChanged() {
         pairingImported = PairingStore.isImported
-    }
-}
-
-/// Staged custom icons, shared by the Your Icons table and all
-/// three gallery tables so every row sees the same staged set.
-/// Single writer to CustomIconStore.
-final class IconStage: ObservableObject {
-    @Published var entries: [CustomIconEntry] = CustomIconStore.load()
-
-    func isStaged(bundleID: String) -> Bool {
-        entries.contains { $0.bundleID == bundleID }
-    }
-
-    func stage(_ entry: CustomIconEntry) {
-        if let i = entries.firstIndex(where: { $0.bundleID == entry.bundleID }) {
-            entries[i] = entry
-        } else {
-            entries.append(entry)
-        }
-        CustomIconStore.save(entries)
-    }
-
-    func remove(at offsets: IndexSet) {
-        entries.remove(atOffsets: offsets)
-        CustomIconStore.save(entries)
-    }
-
-    /// Appends a blank entry for the editor; returns its index.
-    func addBlank() -> Int {
-        entries.append(CustomIconEntry())
-        CustomIconStore.save(entries)
-        return entries.count - 1
-    }
-
-    /// Writes back an edited draft, matched by stable UUID (never by
-    /// index). Falls back to append if the entry vanished mid-edit.
-    func update(_ entry: CustomIconEntry) {
-        if let i = entries.firstIndex(where: { $0.id == entry.id }) {
-            entries[i] = entry
-        } else {
-            entries.append(entry)
-        }
-        CustomIconStore.save(entries)
-    }
-
-    func save() {
-        CustomIconStore.save(entries)
     }
 }

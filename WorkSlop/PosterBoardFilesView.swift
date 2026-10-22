@@ -1,22 +1,18 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Import-first PosterBoard file management: the user brings .tendies
-/// (or .batter template) files; the modes stage them for the engine.
-/// Plain table, no animation behind the content.
+/// Import-first PosterBoard file management: the user brings
+/// .tendies files; the engine's PosterBoard stage delivers them on
+/// the next apply. Plain table, no animation behind the content.
 struct PosterBoardFilesView: View {
     @State private var importing = false
     @State private var note: String?
     @State private var files: [String] = TendiesStore.list(kind: "Tendies")
-    @State private var templateFiles: [String] = TendiesStore.list(kind: "Templates")
-    /// Which table the single importer serves. One importer only: two
-    /// .fileImporter modifiers on one view conflict.
-    @State private var importKind = "Tendies"
 
     var body: some View {
         List {
             Section {
-                Button("Import PosterBoard file (.tendies)") { importKind = "Tendies"; importing = true }
+                Button("Import PosterBoard file (.tendies)") { importing = true }
                     .accessibilityIdentifier("pb-import")
                 if files.isEmpty {
                     Text("Nothing imported. PosterBoard delivers nothing until at least one .tendies is here.")
@@ -35,30 +31,7 @@ struct PosterBoardFilesView: View {
             } header: {
                 Text("PosterBoard (.tendies)")
             } footer: {
-                Text("Up to 5 files ride one apply (desktop cap).")
-            }
-
-            Section {
-                Button("Import Template file (.batter)") { importKind = "Templates"; importing = true }
-                    .accessibilityIdentifier("themes-template-import")
-                if templateFiles.isEmpty {
-                    Text("Nothing imported. Templates install and manage delivered PosterBoard content the desktop way.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(templateFiles, id: \.self) { name in
-                        Label(name, systemImage: "doc")
-                            .font(.footnote)
-                    }
-                    .onDelete { offsets in
-                        TendiesStore.delete(at: offsets, from: templateFiles, kind: "Templates")
-                        templateFiles = TendiesStore.list(kind: "Templates")
-                    }
-                }
-            } header: {
-                Text("Templates (.batter)")
-            } footer: {
-                Text("Template packages manage delivered PosterBoard content. (The database/Configurations side exists on desktop and is not offered on mobile.)")
+                Text("Imported files ride the next apply when the Tendies toggle is staged.")
             }
 
             if let note {
@@ -73,24 +46,21 @@ struct PosterBoardFilesView: View {
         .navigationTitle("PosterBoard Files")
         .navigationBarTitleDisplayMode(.inline)
         .fileImporter(isPresented: $importing,
-                      allowedContentTypes: [UTType(filenameExtension: importKind == "Tendies" ? "tendies" : "batter") ?? .data],
+                      allowedContentTypes: [UTType(filenameExtension: "tendies") ?? .data],
                       allowsMultipleSelection: true) { result in
-            let kind = importKind
-            let ext = kind == "Tendies" ? "tendies" : "batter"
             switch result {
             case .success(let urls):
                 var imported = 0
                 for url in urls {
-                    guard url.pathExtension.lowercased() == ext else { continue }
+                    guard url.pathExtension.lowercased() == "tendies" else { continue }
                     let scoped = url.startAccessingSecurityScopedResource()
                     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-                    if TendiesStore.save(url: url, kind: kind) { imported += 1 }
+                    if TendiesStore.save(url: url, kind: "Tendies") { imported += 1 }
                 }
                 files = TendiesStore.list(kind: "Tendies")
-                templateFiles = TendiesStore.list(kind: "Templates")
                 note = imported > 0
-                    ? "Imported \(imported) .\(ext) file(s) into \(kind). Staged for the next engine apply."
-                    : "Nothing imported - this table takes .\(ext) only."
+                    ? "Imported \(imported) .tendies file(s). They ride the next engine apply."
+                    : "Nothing imported - this table takes .tendies only."
             case .failure:
                 note = "Import cancelled."
             }
@@ -113,9 +83,8 @@ enum TendiesStore {
     }
 
     static func save(url: URL, kind: String) -> Bool {
-        // No import-time cap: desktop caps .tendies at 5 per
-        // restore, at apply time - imports are never refused,
-        // and templates are not capped at all.
+        // No import-time cap: imports are never refused; the
+        // engine decides how much rides one apply.
         let dest = dir(kind: kind).appendingPathComponent(url.lastPathComponent)
         do {
             if FileManager.default.fileExists(atPath: dest.path) {
@@ -126,6 +95,10 @@ enum TendiesStore {
         } catch {
             return false
         }
+    }
+
+    static func urls(kind: String) -> [URL] {
+        list(kind: kind).map { dir(kind: kind).appendingPathComponent($0) }
     }
 
     static func delete(at offsets: IndexSet, from files: [String], kind: String) {

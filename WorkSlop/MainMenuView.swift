@@ -15,7 +15,6 @@ struct MainMenuView: View {
     let demoScreen: String?
     @EnvironmentObject private var status: StatusStore
     @EnvironmentObject private var selection: SelectionStore
-    @EnvironmentObject private var iconStage: IconStage
     @State private var path: [HomeRoute] = []
     @State private var importing = false
     @State private var pairingNote: String?
@@ -72,7 +71,7 @@ struct MainMenuView: View {
         }
         .fileImporter(
             isPresented: $importing,
-            allowedContentTypes: [.propertyList]
+            allowedContentTypes: PairingRecord.types + [.propertyList]
         ) { result in
             switch result {
             case .success(let url): flashNote(importPairing(from: url) ?? "Pairing file saved.")
@@ -134,20 +133,16 @@ struct MainMenuView: View {
             .padding(.vertical, 12)
 
             HStack {
-                Button(status.pairingImported ? "Re-import pairing file" : "Import pairing file (.plist)") {
+                Button(status.pairingImported ? "Re-import pairing file" : "Import pairing file") {
                     importing = true
                 }
                 .accessibilityIdentifier("import-pairing")
                 Spacer()
                 if status.pairingImported {
                     Button("Delete", role: .destructive) {
-                        do {
-                            try FileManager.default.removeItem(at: PairingStore.fileURL)
-                            status.pairingChanged()
-                            flashNote("Pairing file deleted from the app container.")
-                        } catch {
-                            flashNote("Could not delete the pairing file: \(error.localizedDescription)")
-                        }
+                        PairingStore.delete()
+                        status.pairingChanged()
+                        flashNote("Pairing file deleted from the app container.")
                     }
                 }
             }
@@ -222,17 +217,11 @@ struct MainMenuView: View {
     }
 
     private var canApply: Bool {
-        status.unlocked && (!selection.staged.isEmpty || hasStagedIcons)
-    }
-
-    /// True when at least one custom icon has a bundle ID (matches
-    /// ApplyView's gate so the Home button and the Apply screen agree).
-    private var hasStagedIcons: Bool {
-        iconStage.entries.contains { !$0.bundleID.isEmpty }
+        status.unlocked && !selection.staged.isEmpty
     }
 
     private var applyLabel: String {
-        let total = selection.staged.count + (hasStagedIcons ? 1 : 0)
+        let total = selection.staged.count
         if total == 0 { return "Apply (stage tweaks first)" }
         if !status.pairingImported { return "Apply (import pairing file first)" }
         if !status.vpnDetected { return "Apply (VPN tunnel not detected)" }
@@ -323,24 +312,15 @@ struct MainMenuView: View {
     // MARK: - Pairing import
 
     private func importPairing(from url: URL) -> String? {
-        guard url.pathExtension.lowercased() == "plist" else {
-            return "Only a .plist pairing file is accepted - nothing was saved."
+        // The backend's acceptance path validates the content (an XML
+        // plist pairing record) itself and names the problem when it
+        // refuses — the extension is not judged here.
+        if let problem = PairingStore.importFile(at: url) {
+            return problem
         }
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let data = try? Data(contentsOf: url) else {
-            return "The file could not be read - nothing was saved."
-        }
-        guard PairingStore.validate(data) else {
-            return "That file is not a readable pairing record (.plist) - nothing was saved."
-        }
-        do {
-            try PairingStore.save(data)
-            status.pairingChanged()
-            return "Pairing file saved."
-        } catch {
-            return "Could not save the pairing file: \(error.localizedDescription)"
-        }
+        status.pairingChanged()
+        BackendBootstrap.start()
+        return "Pairing file saved."
     }
 }
 
@@ -358,25 +338,25 @@ struct AboutInfoView: View {
             List {
                 Section {
                     Text("Applying tweaks on iOS 27 is experimental and risky. iOS 27 can put your iPhone into a BOOTLOOP (stuck on the Apple logo, will not start).")
-                    Text("A full backup of ALL your data is taken before anything is written, but a backup cannot undo every kind of damage. The owner of this software (adnan.120hz) is NOT responsible for any damage, bootloop, or data loss.")
+                    Text("On iOS 27 a full protective backup of your data is taken before anything is written, but a backup cannot undo every kind of damage. The owner of this software (adnan.120hz) is NOT responsible for any damage, bootloop, or data loss.")
                     Text("Your device backup must NOT be encrypted, otherwise the apply is refused before anything is written.")
-                    Text("Find My must be OFF before an apply and back ON afterwards. A running restore cannot be cancelled mid-flight - never force-quit the app while it runs.")
+                    Text("Never force-quit the app while an apply runs: cancelling is best-effort, and a restore already in flight may finish or stop part-way.")
                 } header: {
                     Text("Risks")
                 }
 
                 Section {
-                    Text("1. Import your pairing file (.plist) on this screen. On iOS 26 it comes from a computer (iDevice Pair / Apple Configurator); without it nothing can be delivered.")
+                    Text("1. Import your pairing file on this screen. It comes from a computer (iDevice Pair / Apple Configurator) or a pairing app; without it nothing can be delivered.")
                     Text("2. Start a loopback VPN tunnel using LocalDevVPN until the VPN tunnel row above says DETECTED. This is not an internet VPN - no traffic leaves your iPhone.")
                     Text("3. Open All Tweaks, pick a category, and stage the tweaks you want with the toggles.")
-                    Text("4. Back on Home, tap Apply. Confirm Find My is OFF, then follow the progress. When it finishes, restart your iPhone manually and check the tweaks.")
+                    Text("4. Back on Home, tap Apply and follow the progress. When it finishes, restart your iPhone manually and check the tweaks.")
                 } header: {
                     Text("How to use")
                 }
 
                 Section {
-                    Text("iOS 16 - 26: partial (sparse) restore. Only the staged files are delivered - no full backup, no wipe, no reboot by the app.")
-                    Text("iOS 27: full backup → payload → modify → restore, with all your data (the WorkSlop Desktop method). The phone is rebooted as part of the method; if it does not come back, force-restart it (Volume Up, Volume Down, hold the Side button).")
+                    Text("iOS 26: partial (sparse) restore. Only the staged files are delivered - no full backup, no wipe, no reboot by the app.")
+                    Text("iOS 27: a protective backup of all your data is taken first, the tweaks are injected into it, and the modified backup is restored. The app does not reboot the phone - restart it yourself afterwards. If it ever gets stuck on the Apple logo, force-restart it (Volume Up, Volume Down, hold the Side button).")
                 } header: {
                     Text("iOS 26 vs iOS 27")
                 }

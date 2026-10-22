@@ -10,16 +10,20 @@ struct WorkSlopApp: App {
         // picker is gone, so pin AppleLanguages to English at launch
         // (also clears any language a previous version had set).
         UserDefaults.standard.set(["en"], forKey: "AppleLanguages")
+        // Backend launch sequence (logging, AirLift sink, em_proxy),
+        // then the Minimuxer start if a pairing record is in place.
+        BackendBootstrap.appInit()
+        BackendBootstrap.start()
     }
 
-    /// iOS line this build supports: iOS 16 through 27. Up to the
-    /// latest iOS 26 the tweaks ride the partial restore; on iOS 27
-    /// everything rides the full backup -> modify -> restore flow,
-    /// like the desktop. Anything outside the line gets the
-    /// full-screen notice instead of an app that cannot serve it.
+    /// iOS line this build supports: iOS 26 through 27 — the engine's
+    /// line. On iOS 26 the tweaks ride the partial restore; on iOS 27
+    /// a protective backup is taken first, then the modified backup
+    /// is restored. Anything outside the line gets the full-screen
+    /// notice instead of an app that cannot serve it.
     private var iosSupported: Bool {
         let v = DeviceInfo.iosVersion
-        return (16...27).contains(v.major)
+        return (26...27).contains(v.major)
     }
 
     /// `-DemoScreen <name>` deep-links screenshot runs straight to a
@@ -63,7 +67,7 @@ struct UnsupportedIOSView: View {
                 Text("iOS version not supported")
                     .font(.title.weight(.bold))
                     .multilineTextAlignment(.center)
-                Text("This device is running iOS \(DeviceInfoEx.fullVersion). WorkSlop 15.0 supports iOS 16.0 through 27.x.")
+                Text("This device is running iOS \(DeviceInfoEx.fullVersion). WorkSlop 15.0 supports iOS 26.0 through 27.x.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

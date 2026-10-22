@@ -34,9 +34,10 @@ targets:
     sources:
       - path: WorkSlop
         excludes:
+          # The iOS 18 icon-pack PNGs stay in the repo but are no
+          # longer bundled: Icon Themes has no engine in the GN
+          # backend (not ported), so the pack would be dead weight.
           - iOS18Icons
-      - path: WorkSlop/iOS18Icons
-        type: folder
     dependencies:
       - sdk: libsqlite3.tbd
       - sdk: WebKit.framework
