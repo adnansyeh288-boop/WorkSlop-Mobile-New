@@ -751,6 +751,89 @@ class GoldenNuggetEngine {
         }
     }
 
+    /// Remove Tweaks: turn off exactly the tweaks the app recorded as
+    /// applied, by nulling the files they live in (the `TweakReset`
+    /// locations plan). Same delivery pipeline as the page reset —
+    /// protective backup first on iOS 27, verdict-based restore — with
+    /// two differences: no skip-setup files ever ride along, and the
+    /// null is a valid empty plist on every version (see the plan's
+    /// doc for the iOS 26.2+ boot-loop reason).
+    ///
+    /// Removal is per FILE, not per key: every tweak sharing a nulled
+    /// file turns off with it. The Remove page groups the recorded
+    /// tweaks by file so that is visible before the run starts.
+    func removeAppliedTweaks(locations: Set<TweakFileLocation>,
+                             includeStatusBar: Bool) async throws {
+        try await loggedRun("remove tweaks") {
+            try await removeAppliedTweaksRun(locations: locations,
+                                             includeStatusBar: includeStatusBar)
+        }
+    }
+
+    private func removeAppliedTweaksRun(locations: Set<TweakFileLocation>,
+                                        includeStatusBar: Bool) async throws {
+        AppLog.shared.memory.reset()
+        warnIfPreviousCallStillRunning()
+        clearCancel()
+        clearProgress()
+        let runStage = StageTimer("RUN remove tweaks")
+        defer { runStage.done() }
+
+        var locations = locations
+        if includeStatusBar { locations.remove(.statusBarOverridesArchive) }
+        guard !locations.isEmpty || includeStatusBar else {
+            throw GoldenNuggetError("Nothing to remove — the recorded tweaks resolve to no file.")
+        }
+
+        let udid = try await prepareRun()
+        let version = try await resolvedDeviceVersion("")
+        let major = Int(version.split(separator: ".").first ?? "0") ?? 0
+        let dev = DevSettings.effective
+        let ios27 = major >= 27 && !dev.forcePartialRestore
+
+        let plan = TweakReset.plan(locations: locations,
+                                   includeStatusBar: includeStatusBar, ios27: ios27)
+        guard !plan.payloads.isEmpty else {
+            throw GoldenNuggetError("Every recorded file was skipped — nothing to remove.")
+        }
+
+        log("Remove: \(plan.targets.count) file(s) on iOS \(version)")
+        for target in plan.targets {
+            log("  → \(target.path) [\(target.kind.rawValue), "
+                + "\(target.contents.count) bytes]")
+        }
+        for item in plan.skipped { log("  ⚠️ skipped \(item.label): \(item.reason)") }
+        log("A nulled file is written as a valid empty plist on every version — "
+            + "not 0 bytes (a truncated plist is a SpringBoard boot loop on "
+            + "iOS 26.2+). Readers fall back to their defaults.")
+
+        let backupRoot: URL
+        let prune: Bool
+        if ios27 {
+            log("Manifest format: sqlite (iOS 27+ path), protective backup pulled, then pruned")
+            backupRoot = try await protectiveBackup(udid: udid)
+            prune = true
+        } else {
+            log("Manifest format: legacy MBDB (iOS 26 path), built from nothing")
+            backupRoot = try await partialRestore(udid: udid)
+            prune = false
+        }
+
+        try await BackupInjector.pruneAndInject(
+            backupRoot: backupRoot,
+            udid: udid,
+            tweakPayloads: plan.payloads,
+            prune: prune,
+            ios27: ios27
+        )
+
+        try await runRestore(backupRoot: backupRoot, udid: udid, label: "remove tweaks") {
+            log("Remove succeeded: the device confirmed it finished.")
+            log("The files above are back to their defaults. Reboot the device "
+                + "so the change takes effect.")
+        }
+    }
+
     /// The AFC media stage, as a stage rather than a separate button so the run
     /// log tells the whole story in one place.
     private func mediaBackup(deletingOriginals: Bool) async {

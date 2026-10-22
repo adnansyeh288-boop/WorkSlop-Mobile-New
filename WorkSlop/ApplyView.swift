@@ -43,7 +43,7 @@ struct ApplyView: View {
         List {
             Section {
                 preflightRow("Tweaks staged", ok: !selection.staged.isEmpty,
-                             detail: "\(selection.staged.count)")
+                             detail: "\(ApplyCounter.tweakCount(staged: selection.staged))")
                 if !iconStage.staged.isEmpty {
                     preflightRow("Icon themes staged", ok: true,
                                  detail: "\(iconStage.staged.count)")
@@ -312,6 +312,17 @@ struct ApplyView: View {
                                              extraPayloads: iconBuild.payloads)
                 await MainActor.run {
                     finishRun()
+                    // Record what this run put on the device — the
+                    // data Remove Tweaks works from. Dropped features
+                    // and the PosterBoard reset action are not tweaks
+                    // left on the device, so they are not recorded.
+                    AppliedTweaksStore.recordApply(
+                        featureIDs: Array(selection.staged
+                            .subtracting(input.droppedFeatureIDs)
+                            .subtracting(["pb-reset"])),
+                        statusBarActive: statusBar.isActive,
+                        iconBundleIDs: iconStage.staged.map(\.bundleID),
+                        pairingFingerprint: PairingStore.fingerprint)
                     logLines.append("[100%] Done — the engine finished and the device confirmed.")
                     result = .succeeded
                     showRestartSheet = true

@@ -239,15 +239,43 @@ enum DeviceInfo {
 /// Staged (toggled-on) selections, persisted like the desktop's tweak
 /// staging. Staging is selection only: nothing is delivered until the
 /// on-device restore engine is verified.
+///
+/// Persistence is a JSON file in Documents (`StagedFeatures.json`),
+/// written synchronously and atomically on every change — the same
+/// pattern `IconThemeStore` uses, which survives navigation, process
+/// death and reboots alike. The previous UserDefaults-backed version
+/// could come back empty when the user left the tweaks page and
+/// returned before applying (the toggles read as off even though the
+/// defaults copy later reappeared after a restart); the file is now
+/// the single source of truth, with the legacy defaults key read once
+/// as a fallback so an upgrade keeps its staged set. Every change is
+/// also written to the app log, so the Log page can prove what was
+/// staged and when.
 final class SelectionStore: ObservableObject {
-    @Published private(set) var staged: Set<String> {
-        didSet {
-            UserDefaults.standard.set(Array(staged), forKey: "stagedFeatures")
-        }
+    @Published private(set) var staged: Set<String>
+
+    private static var fileURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("StagedFeatures.json")
     }
 
     init() {
-        staged = Set(UserDefaults.standard.stringArray(forKey: "stagedFeatures") ?? [])
+        if let data = try? Data(contentsOf: Self.fileURL),
+           let ids = try? JSONDecoder().decode([String].self, from: data) {
+            staged = Set(ids)
+        } else {
+            staged = Set(UserDefaults.standard.stringArray(forKey: "stagedFeatures") ?? [])
+            if !staged.isEmpty { Self.persist(staged) }
+        }
+    }
+
+    private static func persist(_ staged: Set<String>) {
+        let ids = staged.sorted()
+        if let data = try? JSONEncoder().encode(ids) {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+        // Mirror for anything still reading the legacy key.
+        UserDefaults.standard.set(ids, forKey: "stagedFeatures")
     }
 
     func isOn(_ id: String) -> Bool { staged.contains(id) }
@@ -255,14 +283,15 @@ final class SelectionStore: ObservableObject {
     /// Cancel: unstage everything. Nothing is sent anywhere — this is
     /// the pre-apply cancel the Apply menu offers.
     func clear() {
+        guard !staged.isEmpty else { return }
         staged = []
+        Self.persist(staged)
+        AppLog.write("Staged tweaks cleared — 0 staged")
     }
 
     func set(_ id: String, _ on: Bool) {
         // Build the next set and assign once: one publish and one
-        // UserDefaults write per tap, instead of one per mutation
-        // (plus the manual objectWillChange sends that used to
-        // double every invalidation - @Published already sends).
+        // file write per tap, instead of one per mutation.
         var next = staged
         if on {
             next.insert(id)
@@ -272,8 +301,33 @@ final class SelectionStore: ObservableObject {
         } else {
             next.remove(id)
         }
-        if next != staged { staged = next }
+        if next != staged {
+            staged = next
+            Self.persist(next)
+            AppLog.write("Staged \(id) \(on ? "on" : "off") — \(next.count) staged")
+        }
     }
+}
+
+/// The user-entered corner radius for the Liquid Glass corner tweak.
+///
+/// On the desktop this tweak is a NUMBER field (0–60, typed by hand),
+/// not a fixed toggle — the radius is the user's choice, with 0 =
+/// fully square. Stored in UserDefaults; the selection builder reads
+/// it when the staged feature is applied and overrides the spec's
+/// multi-values with it.
+enum CornerRadiusStore {
+    static let range = 0...60
+    private static let key = "lgCornerRadiusValue"
+
+    static var value: Int {
+        get { range.clamp(UserDefaults.standard.integer(forKey: key)) }
+        set { UserDefaults.standard.set(range.clamp(newValue), forKey: key) }
+    }
+}
+
+private extension ClosedRange where Bound == Int {
+    func clamp(_ v: Int) -> Int { Swift.min(Swift.max(v, lowerBound), upperBound) }
 }
 
 enum FeatureCatalog {
@@ -364,7 +418,7 @@ enum FeatureCatalog {
                 subtitle: "UIViewGlassLegibilitySetting = 2 (UIKit)", section: "Liquid Glass",
                 route: .partialRestore, window: gnLine),
         Feature(id: "lg-corner-radius", title: "Flat Square Corners",
-                subtitle: "SolariumCornerRadius = 0 + InsetsAndCornerRadiusEnabled", section: "Liquid Glass",
+                subtitle: "SolariumCornerRadius — a number you set (0 = square) + InsetsAndCornerRadiusEnabled", section: "Liquid Glass",
                 route: .partialRestore, window: gnLine),
         Feature(id: "lg-force-fallback", title: "Force Solarium Fallback",
                 subtitle: "SolariumForceFallback", section: "Liquid Glass",
@@ -496,5 +550,10 @@ enum FeatureCatalog {
 
     static func features(in section: String) -> [Feature] {
         bySection[section] ?? []
+    }
+
+    /// Lookup by id (the catalog's `all` list is the source).
+    static func feature(id: String) -> Feature? {
+        all.first { $0.id == id }
     }
 }

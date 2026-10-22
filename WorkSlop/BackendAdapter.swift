@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // MARK: - PairingStore (WorkSlop's pairing API over the GN record)
@@ -22,6 +23,16 @@ enum PairingStore {
     }
 
     static var isImported: Bool { loadRaw() != nil }
+
+    /// SHA-256 of the stored pairing record, or nil when none is
+    /// imported. The applied-tweaks record stores this at apply time;
+    /// Remove Tweaks compares it before running, because a removal is
+    /// only meaningful against the device the recorded pairing reaches
+    /// — a removed or replaced pairing file invalidates the record.
+    static var fingerprint: String? {
+        guard let raw = loadRaw(), let data = raw.data(using: .utf8) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
 
     /// Import a picked file through the backend's acceptance path
     /// (validate → write canonical → read back) and remember it for
@@ -262,10 +273,55 @@ enum GNSelectionBuilder {
                     input.droppedFeatureIDs.append(id)
                 } else {
                     for spec in specs { input.selection.setOn(true, for: spec) }
+                    // The corner tweak carries the user's own number,
+                    // as on the desktop (a NUMBER field, 0–60) — the
+                    // registry default of 0 is only the starting point.
+                    if id == "lg-corner-radius",
+                       let spec = specs.first(where: { $0.id == "SolariumCornerRadius" }) {
+                        input.selection.restore(
+                            enabled: true, value: nil,
+                            multiValues: [
+                                "SolariumCornerRadius": .int(CornerRadiusStore.value),
+                                "SolariumInsetsAndCornerRadiusEnabled": .bool(true),
+                            ],
+                            for: spec)
+                    }
                     input.mappedFeatures += 1
                 }
             }
         }
         return input
+    }
+}
+
+/// The REAL number of tweaks a staged set delivers.
+///
+/// The Home Apply button used to count staged feature IDs, which
+/// undercounts: one staged feature can write several specs (the
+/// Recommended daemon set is one toggle for dozens of daemons), and
+/// it ignored icon themes and status bar overrides entirely. This
+/// counts what an apply actually writes: every spec of every staged
+/// feature, one per PosterBoard tendie / reset mode, plus the icon
+/// themes and the status bar overrides when those are active.
+enum ApplyCounter {
+    static func tweakCount(staged: Set<String>) -> Int {
+        var n = 0
+        for id in staged {
+            switch id {
+            case "pb-tendies":
+                n += TendiesStore.urls(kind: "Tendies").count
+            case "pb-reset":
+                n += PosterBoardResetMode.allCases.count
+            default:
+                n += GNMapping.specs(forFeature: id).count
+            }
+        }
+        return n
+    }
+
+    static func total(staged: Set<String>, iconCount: Int,
+                      statusBarActive: Bool, statusBarCount: Int) -> Int {
+        tweakCount(staged: staged) + iconCount
+            + (statusBarActive ? statusBarCount : 0)
     }
 }

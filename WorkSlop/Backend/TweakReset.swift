@@ -262,6 +262,70 @@ enum TweakReset {
                     skipSetupAllowed: skipSetupAllowed(pages: ordered, ios27: ios27))
     }
 
+    /// The Remove Tweaks plan: null exactly the files the recorded
+    /// applied tweaks live in — no page grouping, no skip-setup files.
+    ///
+    /// One deliberate deviation from the page reset above: the null is
+    /// a valid empty plist on EVERY version, not 0 bytes on iOS 26.
+    /// This app's floor is iOS 26, and the reference's own warning
+    /// (quoted in the type doc) names iOS 26.2+ — a truncated plist
+    /// makes SpringBoard crash at boot there. An empty dict parses
+    /// fine on 26 too and every reader falls back to its defaults,
+    /// which is the whole point of the null; the 0-byte form buys
+    /// nothing on the versions this app supports.
+    ///
+    /// The daemons file keeps its stock dict and the status bar its
+    /// zeroed mechanism payload, exactly as in the page reset.
+    static func plan(locations: Set<TweakFileLocation>,
+                     includeStatusBar: Bool, ios27: Bool) -> Plan {
+        var targets: [Target] = []
+        var payloads: [TweakPayload] = []
+        var skipped: [(label: String, reason: String)] = []
+
+        func append(path: String, contents: Data, kind: Kind,
+                    domain: String, relativePath: String) {
+            targets.append(Target(path: path, contents: contents, kind: kind))
+            payloads.append(TweakPayload(domain: domain, relativePath: relativePath,
+                                         contents: contents))
+        }
+
+        if includeStatusBar {
+            let mechanism: StatusBarMechanism = ios27 ? .archive : .classic
+            if let built = try? mechanism.payload(for: StatusBarOverrides()) {
+                append(path: mechanism.restorePath, contents: built.data,
+                       kind: ios27 ? .statusBarArchive : .statusBarClassic,
+                       domain: mechanism.domain, relativePath: mechanism.restorePath)
+            } else {
+                skipped.append((mechanism.restorePath,
+                                "could not build the reset status bar payload"))
+            }
+        }
+
+        // Sorted by path: a Set has no order, and the run log should
+        // read the same for the same removal set.
+        for location in locations.sorted(by: { $0.rawValue < $1.rawValue }) {
+            guard let dest = TweakDomainMap.split(path: location.rawValue) else {
+                skipped.append((location.rawValue,
+                                "no backup-domain prefix matches this location"))
+                continue
+            }
+            if location == .disabledDaemons {
+                append(path: location.rawValue,
+                       contents: TweakCompiler.serialisePlist(stockDisabledDaemons),
+                       kind: .stockDaemons,
+                       domain: dest.domain, relativePath: dest.relativePath)
+            } else {
+                append(path: location.rawValue,
+                       contents: TweakCompiler.serialisePlist([:]),
+                       kind: .emptyPlist,
+                       domain: dest.domain, relativePath: dest.relativePath)
+            }
+        }
+
+        return Plan(targets: targets, payloads: payloads, skipped: skipped,
+                    skipSetupAllowed: false)
+    }
+
     /// The reference's `add_skip_setup` gate, reproduced exactly:
     ///
     /// ```python

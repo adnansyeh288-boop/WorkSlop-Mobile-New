@@ -9,6 +9,10 @@ import SwiftUI
 /// iOS 26 and the overrides archive on iOS 27.
 struct StatusBarView: View {
     @State private var selection: StatusBarSelection
+    /// The carrier name being typed, before Save commits it. Nil when
+    /// the field is untouched — the Save button exists only while a
+    /// draft differs from the saved name.
+    @State private var carrierDraft: String?
 
     init() {
         var loaded = StatusBarSelection()
@@ -48,7 +52,7 @@ struct StatusBarView: View {
                 }
 
                 Section("Carrier") {
-                    textRow("Carrier name", .carrierName, prompt: "Carrier")
+                    carrierNameRow()
                     networkRow("Data network type", .dataNetworkType)
                     barsRow("Signal bars", .signalBars, range: 0...4)
                     textRow("Service badge", .serviceBadge, prompt: "Badge")
@@ -99,6 +103,43 @@ struct StatusBarView: View {
     }
 
     // MARK: - Rows
+
+    /// The custom carrier name — the one field on this page with an
+    /// explicit Save. Typing edits a draft; the small Save button
+    /// appears only while the draft differs from the saved name, and
+    /// tapping it commits the draft through the normal field binding,
+    /// so the saved name is stored and rides along with Apply exactly
+    /// like every other field on the page.
+    private func carrierNameRow() -> some View {
+        let field = fieldBinding(.carrierName)
+        let saved = field.wrappedValue.text
+        let hasDraft = carrierDraft != nil && carrierDraft != saved
+        return VStack(alignment: .leading, spacing: 6) {
+            Toggle("Carrier name", isOn: field.set)
+            if field.wrappedValue.set {
+                HStack(spacing: 8) {
+                    TextField("Carrier", text: Binding(
+                        get: { carrierDraft ?? saved },
+                        set: { carrierDraft = $0 }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    if hasDraft {
+                        Button("Save") {
+                            var updated = field.wrappedValue
+                            updated.text = carrierDraft ?? saved
+                            updated.set = true
+                            field.wrappedValue = updated
+                            carrierDraft = nil
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("statusbar-carrier-save")
+                    }
+                }
+            }
+        }
+    }
 
     private func textRow(_ title: String, _ key: StatusBarOverrides.FieldKey,
                          prompt: String) -> some View {

@@ -8,6 +8,8 @@ import SwiftUI
 enum HomeRoute: Hashable {
     case allTweaks
     case settings
+    case log
+    case removeTweaks
     case apply
 }
 
@@ -60,6 +62,8 @@ struct MainMenuView: View {
                 switch route {
                 case .allTweaks: AllTweaksView()
                 case .settings: SettingsView()
+                case .log: LogView()
+                case .removeTweaks: RemoveTweaksView()
                 case .apply: ApplyView()
                 }
             }
@@ -247,11 +251,28 @@ struct MainMenuView: View {
     }
 
     private var canApply: Bool {
-        status.unlocked && (!selection.staged.isEmpty || !iconStage.staged.isEmpty)
+        var statusBar = StatusBarSelection()
+        if let stored = StatusBarPreferences.storedSelection() {
+            statusBar.restore(from: stored)
+        }
+        return status.unlocked && (!selection.staged.isEmpty
+            || !iconStage.staged.isEmpty || statusBar.isActive)
     }
 
     private var applyLabel: String {
-        let total = selection.staged.count + iconStage.staged.count
+        // The REAL deliverable count: every spec of every staged
+        // feature (one daemon-group toggle can be dozens of tweaks),
+        // plus icon themes and the status bar overrides when active —
+        // not the raw number of staged feature IDs.
+        var statusBar = StatusBarSelection()
+        if let stored = StatusBarPreferences.storedSelection() {
+            statusBar.restore(from: stored)
+        }
+        let total = ApplyCounter.total(
+            staged: selection.staged,
+            iconCount: iconStage.staged.count,
+            statusBarActive: statusBar.isActive,
+            statusBarCount: statusBar.overrides.activeCount)
         if total == 0 { return "Apply (stage tweaks first)" }
         if !status.pairingImported { return "Apply (import pairing file first)" }
         if !status.vpnDetected { return "Apply (VPN tunnel not detected)" }
@@ -309,6 +330,50 @@ struct MainMenuView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("menu-settings")
+            Divider()
+                .padding(.leading, 46)
+            Button {
+                path.append(.log)
+            } label: {
+                HStack {
+                    Label {
+                        Text("Log")
+                    } icon: {
+                        RowIcon(name: "doc.text")
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("menu-log")
+            Divider()
+                .padding(.leading, 46)
+            Button {
+                path.append(.removeTweaks)
+            } label: {
+                HStack {
+                    Label {
+                        Text("Remove Tweaks")
+                    } icon: {
+                        RowIcon(name: "trash")
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("menu-remove-tweaks")
         }
         .padding(.horizontal, 16)
         .background(cardBackground)

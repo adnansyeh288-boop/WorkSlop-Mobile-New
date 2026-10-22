@@ -87,6 +87,20 @@ ride the engine's unchanged delivery (see Changes from upstream).
 - The upstream status-bar override engine got its missing page
   (`StatusBarView`): Apply now sends the selection the page saves
   instead of an empty one.
+- App-layer fixes (2026-10-22): the Home Apply count is the real
+  deliverable count (specs, icon themes, status bar overrides), not
+  staged feature IDs; a Log page reads the engine's rotating log file
+  (which survives restarts); the carrier name field has an explicit
+  Save for its draft; staged selections persist in a Documents JSON
+  file (the icon-stage pattern) instead of UserDefaults only; the
+  corner-radius tweak takes the user's own number (0–60, like the
+  desktop's NUMBER field) via a spec multi-value override; and a
+  Remove Tweaks page records each successful apply and removes
+  exactly those tweaks by nulling their files through the engine's
+  `TweakReset` machinery (valid empty plist on every version — a
+  deliberate deviation from the page reset's iOS 26 0-byte null,
+  because a truncated plist is a SpringBoard boot loop on
+  iOS 26.2+), gated on the apply-time pairing fingerprint.
 
 ## Credits
 

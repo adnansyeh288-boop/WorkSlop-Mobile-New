@@ -83,7 +83,26 @@ struct TweakListView: View {
             List {
                 Section {
                     ForEach(FeatureCatalog.features(in: group.catalogSection)) { feature in
-                        FeatureToggleRow(feature: feature)
+                        if feature.id == "lg-corner-radius" {
+                            // The corner tweak is a number the user
+                            // types by hand (as on the desktop), so its
+                            // row opens the number page instead of a
+                            // plain toggle.
+                            NavigationLink {
+                                CornerRadiusView()
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(feature.title)
+                                    Text("SolariumCornerRadius = \(CornerRadiusStore.value) (tap to set the number)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .accessibilityIdentifier("nav-corner-radius")
+                        } else {
+                            FeatureToggleRow(feature: feature)
+                        }
                     }
                     if group.id == "PosterBoard" {
                         NavigationLink {
