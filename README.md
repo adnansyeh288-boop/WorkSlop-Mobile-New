@@ -1,40 +1,78 @@
 # WorkSlop — Mobile (New)
 
-Versi mobile baru WorkSlop, dibangun dari nol (bukan fork). Target fitur =
-paritas WorkSlop Desktop v14.0 dengan dua jalur kirim yang sama seperti di
-desktop untuk iOS 26:
+WorkSlop Mobile by **adnan.120hz**. The tweak engine / apply method in this
+app is a fork of **GoldenNugget by
+[awesomenull-dev](https://github.com/awesomenull-dev/GoldenNugget)**
+(GoldenNugget-Team /
+[GoldenNugget-mobile](https://github.com/GoldenNugget-Team/GoldenNugget-mobile)),
+imported from the fork `adnan120hz/GoldenNugget-mobile`. The user interface
+is WorkSlop's own; the GoldenNugget UI is not used. Licensed under
+**AGPL-3.0** (see `LICENSE`), following the upstream license.
 
-- **Partial restore** untuk SEMUA tweak iOS 26, termasuk set Liquid Glass
-  reguler. (Tweak desktop lama Beta 1 sudah dihapus maintainer dan tidak
-  ada di sini.)
-- **Full backup → payload → modify → full restore** khusus tweak hasil
-  audit S8 (Liquid Glass Terbaru: `SolariumForceFallback` →
-  `com.apple.SwiftUI.plist`, 2 key lock-screen, key specular) — full
-  backup semua data, sama seperti desktop.
-- Menu **Full Backup / Protective Backup TIDAK ada** di mobile (catatan
-  sistemnya tetap dipakai internal). Menyimpan backup dari app ke Files
-  terlalu berat; jalur iOS 27 desktop (protective backup: foto, video,
-  pesan, kontak, data Apple ID/settings, keychain) tidak diangkut ke UI
-  mobile.
-- Menu **Passcode Theme TIDAK ada** di mobile (di desktop tetap ada).
-- Katalog fitur mencerminkan section desktop (Liquid Glass, Status Bar,
-  SpringBoard, Internal Options, Custom Icons). Section desktop
-  "Feature Flags" sengaja tidak diangkut: kanal kirimnya terbukti
-  tertutup di iOS 26.6.1 retail, jadi tidak bisa ditawarkan dengan jujur.
-- File pairing = `.plist` hasil `idevicepair pair`, diimpor sekali di
-  Settings dan disimpan di container app.
-- Settings punya opsi **3 UI** (WorkSlop v4 / Nugget / Modern) yang
-  benar-benar mengubah tema app.
+## Status (honest)
 
-Status jujur saat ini:
+- **2026-10-22 — backend replaced.** The previous home-grown Swift/FFI
+  tweak engine did not work reliably, so it was removed entirely and
+  replaced with the GoldenNugget-mobile backend (`GoldenNuggetEngine`,
+  TweakCatalog specs, Minimuxer/EMProxy tunnel, AirliftFFI PosterBoard).
+  The WorkSlop UI was kept and rewired to that engine
+  (`BackendAdapter.swift`, `BackendBootstrap.swift`).
+- **Supported devices: iOS 26.0 and newer only** (the GN backend requires
+  the iOS 26 SDK surface). The app says so on unsupported versions.
+- Apply flow (from the GN engine, unchanged): tweaks are compiled to
+  payloads, PosterBoard is applied via Airlift or backup fetch, iOS 27+
+  first takes a protective mobilebackup2 backup, iOS 26 uses the
+  synthetic partial-restore path. There is **no automatic reboot** and
+  **no backup-password / Find My step** in this engine — an encrypted
+  device backup fails fast instead.
+- Pairing file (`.plist` from `idevicepair pair`) is imported once in the
+  app and stored in the app container, same as before.
 
-- Kerangka UI (Home, Liquid Glass, Tweaks, Settings) mencerminkan desktop.
-- Fitur terkunci **hanya** bila iOS device di luar jendela dukungannya;
-  iOS yang mendukung = terbuka, sama seperti desktop. Toggle memilih
-  (staging) tweak, persis desktop.
-- App ini **belum punya mesin restore on-device yang terverifikasi**.
-  Tombol Apply menyatakan itu apa adanya — file pairing terimpor bukan
-  bukti kirim, dan tidak ada restore/progress/"terkirim" palsu.
-- Mata rantai yang belum terbukti: sesi restore loopback dari sandbox app
-  di iOS 26.6.1. Wajib lulus spike verifikasi sebelum Apply menjalankan
-  apa pun. Gagal spike = arah app dilaporkan mati, bukan dikirim rusak.
+## Features removed in the 2026-10-22 migration
+
+These WorkSlop features have **no engine in GoldenNugget-mobile** and were
+removed rather than left as dead UI:
+
+- **Custom Icons / Icon Themes** (the iOS 18 icon pack flow) — not ported
+  upstream.
+- **PosterBoard Templates (`.batter`)** — not ported upstream. `.tendies`
+  wallpapers and the three PosterBoard reset modes remain.
+- **AirFlit** (AirCard passcode themes + Wallet images) — removed by
+  decision; not part of this build.
+- One Liquid Glass legibility toggle whose key does not exist in the GN
+  backend.
+
+Everything else in the UI (Liquid Glass, SpringBoard, Internal Options,
+Daemons incl. Recommended set, PosterBoard) maps 1:1 onto specs in the GN
+TweakCatalog.
+
+## Changes from upstream
+
+- Replaced the GoldenNugget UI with the WorkSlop UI (SwiftUI); only the
+  backend (`Nugget/Core`, tunnel stack, vendored Minimuxer / IDevice /
+  AirliftFFI frameworks) is imported, unmodified except for project
+  integration.
+- App identity: bundle `com.adnan120hz.workslop`, name "WorkSlop".
+- Feature catalogue presented in WorkSlop's grouping; daemon groups are
+  driven from the upstream `DaemonGroups.all` data.
+- Bootstrap sequence extracted from the upstream app's views into
+  `BackendBootstrap` so the WorkSlop UI can start the same stack.
+
+## Credits
+
+- [awesomenull] Lead developer
+- [Wind0ws11Aero] for helping with development a lot.
+- [@mak5er](https://github.com/mak5er): AirCard developer.
+- [NeoSpring](https://github.com/rooootdev/neospring): Swift implementation by **[@skadz108](https://github.com/skadz108)** and **[@rooootdev](https://github.com/rooootdev)**, and **[@neonmodder123](https://github.com/neonmodder123)** for the WebKit GPU process respring technique.
+- [LeminLimez] for creating Nugget.
+- [0xjonhnnydev] for [AirLift]
+- [iTechExpert][iTechExpertTwitter] for various Springboard/Internal Options
+- [Mikasa-san][Mikasa-sanGitHub] for [Quiet Daemon][QuietDaemonGitHub]
+- WorkSlop UI and integration: adnan.120hz
+
+[awesomenull]: https://github.com/awesomenull-dev
+[Wind0ws11Aero]: https://github.com/Wind0ws11Aero
+[LeminLimez]: https://github.com/leminlimez
+[iTechExpertTwitter]: https://x.com/iTechExpert21
+[Mikasa-sanGitHub]: https://github.com/Mikasa-san
+[QuietDaemonGitHub]: https://github.com/Mikasa-san/QuietDaemon
