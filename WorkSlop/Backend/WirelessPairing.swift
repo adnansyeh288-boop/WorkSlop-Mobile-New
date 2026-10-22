@@ -58,11 +58,12 @@ final class WirelessPairing: NSObject, ObservableObject, NetServiceDelegate {
     /// Where the library wrote the paired record, for the page to adopt.
     @Published private(set) var generatedRecordPath: String?
 
-    /// The host display name.  Named for the app rather than SideStore so the
-    /// identity this advertises is clearly this app's own; the identifier is a
-    /// v3 UUID of the string, so a fresh name is also a fresh identity and the
-    /// device does not confuse it with a stale "Pair with SideStore" row.
-    private static let hostName = "GoldenNugget"
+    /// The host display name — this app's own, per the owner's call
+    /// (2026-10-22): the Settings row reads "Pair with WorkSlop Mobile".
+    /// The identifier is a v3 UUID of the string, so a fresh name is also a
+    /// fresh identity and the device does not confuse it with a stale row
+    /// left by another host name.
+    private static let hostName = "WorkSlop Mobile"
 
     /// The name the device lists in Settings → Privacy & Security → Developer
     /// Mode, where the user taps the pairable host to pair.  Exposed so the
@@ -72,7 +73,7 @@ final class WirelessPairing: NSObject, ObservableObject, NetServiceDelegate {
     /// Where the altIRK from the last successful run is kept.  `al_pairing_run_host`
     /// accepts it back so the host keeps the same trusted identity across runs;
     /// without it every run is a brand-new host to the device.
-    private static let hostAltIRKKey = "com.awesomenull.goldennugget.wirelessPair.hostAltIRK"
+    private static let hostAltIRKKey = "com.adnan120hz.workslop.wirelessPair.hostAltIRK"
 
     /// The Bonjour advertiser.  Held for as long as the run is advertising; the
     /// page only ever talks to this object.
@@ -96,7 +97,7 @@ final class WirelessPairing: NSObject, ObservableObject, NetServiceDelegate {
 
     private func beginBackgroundTask() {
         endBackgroundTask()
-        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "GoldenNugget.WirelessPairing") { [weak self] in
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "WorkSlop.WirelessPairing") { [weak self] in
             Task { @MainActor in
                 GoldenNuggetEngine.shared.log("wireless pair: background time expired before the device connected")
                 self?.endBackgroundTask()

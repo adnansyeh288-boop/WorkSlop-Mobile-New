@@ -23,6 +23,7 @@ struct MainMenuView: View {
     @State private var pairingNote: String?
     @State private var showTunnelInfo = false
     @State private var showAbout = false
+    @ObservedObject private var wireless = WirelessPairing.shared
 
     init(demoScreen: String? = nil) {
         self.demoScreen = demoScreen
@@ -41,9 +42,18 @@ struct MainMenuView: View {
                         deviceCard
                         applyButton
                         menusCard
+                        pairingGenerateCard
                         LockBanner()
                     }
                     .padding()
+                }
+                .onChange(of: wireless.phase) { newPhase in
+                    // The library wrote a fresh record to the canonical
+                    // path: adopt it through the same validation an
+                    // imported file gets, then start the backend the way
+                    // a successful import does.
+                    guard newPhase == .paired else { return }
+                    adoptGeneratedPairing()
                 }
                 .onChange(of: pairingNote) { new in
                     // Transient notes only: clear after 6s so a stale
@@ -232,6 +242,116 @@ struct MainMenuView: View {
     /// screenshot was from an old action).
     private func flashNote(_ note: String) {
         pairingNote = note
+    }
+
+    // MARK: - Get pairing file (wireless, iOS 27)
+
+    /// A separate palette under the menus card (owner's layout call,
+    /// 2026-10-22): generate this iPhone's pairing file on-device. The
+    /// app advertises itself as a pairable host; the user taps "Pair
+    /// with WorkSlop Mobile" in Settings → Privacy & Security →
+    /// Developer Mode and enters the PIN shown here. On iOS 26 the
+    /// daemon never lists the host, so the button is replaced by the
+    /// honest explanation instead of a control that cannot work.
+    private var pairingGenerateCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Label {
+                    Text("Get pairing file")
+                } icon: {
+                    RowIcon(name: "antenna.radiowaves.left.and.right")
+                }
+                Spacer()
+            }
+            .padding(.vertical, 12)
+
+            switch wireless.phase {
+            case .idle:
+                Text("Generate a pairing file on this iPhone — no computer needed. This iPhone pairs with this app over your local network, and the finished file is saved here.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 12)
+                if isWirelessPairingSupported {
+                    HStack {
+                        Button("Get Pairing File") { wireless.start() }
+                            .accessibilityIdentifier("get-pairing-file")
+                        Spacer()
+                    }
+                    .font(.subheadline)
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 12)
+                } else {
+                    Text("Needs iOS 27 — the pairing host only appears in Settings on iOS 27 or later. On this iPhone, use Import pairing file above.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.bottom, 12)
+                }
+            case .advertising:
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Waiting for this iPhone to connect…")
+                            .font(.subheadline)
+                    }
+                    Text("Open Settings → Privacy & Security → Developer Mode and tap “Pair with \(WirelessPairing.displayName)”. Keep this app open in the background while you do it.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if let pin = wireless.pin {
+                        Text("PIN: \(pin)")
+                            .font(.title3.weight(.bold).monospacedDigit())
+                        Text("Enter this PIN in the device prompt in Settings.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Button("Cancel", role: .destructive) { wireless.cancel() }
+                        Spacer()
+                    }
+                    .font(.subheadline)
+                    .buttonStyle(.plain)
+                }
+                .padding(.bottom, 12)
+            case .paired:
+                Text("Pairing complete — saving the generated file…")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 12)
+            case .failed(let message):
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 12)
+                HStack {
+                    Button("Dismiss") { wireless.reset() }
+                    Spacer()
+                }
+                .font(.subheadline)
+                .buttonStyle(.plain)
+                .padding(.bottom, 12)
+            }
+        }
+        .padding(.horizontal, 16)
+        .background(cardBackground)
+    }
+
+    private var isWirelessPairingSupported: Bool {
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+    }
+
+    /// Adopt the record the pairing library just wrote, through
+    /// `PairingRecord.adoptFromDisk` (the same validation an imported
+    /// file gets), then refresh status and start the backend exactly
+    /// the way a successful import does.
+    private func adoptGeneratedPairing() {
+        do {
+            _ = try PairingRecord.adoptFromDisk()
+            status.pairingChanged()
+            BackendBootstrap.start()
+            flashNote("Pairing file generated on this iPhone and saved.")
+        } catch {
+            flashNote(error.localizedDescription)
+        }
+        wireless.reset()
     }
 
     // MARK: - Apply
@@ -441,7 +561,7 @@ struct AboutInfoView: View {
                 }
 
                 Section {
-                    Text("1. Import your pairing file on this screen. It comes from a computer (iDevice Pair / Apple Configurator) or a pairing app; without it nothing can be delivered.")
+                    Text("1. Get a pairing file on this screen: import one from a computer (iDevice Pair / Apple Configurator) or a pairing app — or, on iOS 27, use the Get pairing file palette below the menus and generate it on this iPhone. Without a pairing file nothing can be delivered.")
                     Text("2. Start a loopback VPN tunnel using LocalDevVPN until the VPN tunnel row above says DETECTED. This is not an internet VPN - no traffic leaves your iPhone.")
                     Text("3. Open All Tweaks, pick a category, and stage the tweaks you want with the toggles.")
                     Text("4. Back on Home, tap Apply and follow the progress. When it finishes, restart your iPhone manually and check the tweaks.")
