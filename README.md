@@ -65,6 +65,19 @@ ride the engine's unchanged delivery (see Changes from upstream).
   list the compiled tweaks use. Used by Icon Themes (WebClip folders in
   HomeDomain, the desktop's delivery shape). No upstream delivery code
   changed.
+- Liquid Glass menu extended with the WorkSlop Desktop registry's specs
+  (2026-10-22): nine specs added to `TweakCatalog` (the iOS 26 exterior-
+  effects set, whose keys have no reader on iOS 27 per the WorkSlop
+  firmware audit; `com.apple.SwiftUI.DisableSolarium`; the UIKit glass
+  legibility value; the square-corner key pair) and six catalog version
+  windows widened to iOS 26 where the Desktop registry and firmware
+  evidence support it (`SBDisallowGlassButtons`,
+  `SBDisallowGlassLockScreen`, `SolariumUseDisplayAngle`,
+  `SolariumHighlightWhite`, `SolariumBackgroundFilter`,
+  `UISolariumFloatingContentViewEnableBackgroundFills`).
+- The upstream status-bar override engine got its missing page
+  (`StatusBarView`): Apply now sends the selection the page saves
+  instead of an empty one.
 
 ## Credits
 

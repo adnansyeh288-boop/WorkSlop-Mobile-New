@@ -6,6 +6,8 @@ struct AllTweaksView: View {
     private let groups: [TweakGroup] = [
         TweakGroup(id: "Liquid Glass", icon: "sparkles",
                    footer: "Partial restore on iOS 26; on iOS 27 a protective backup is taken first, then the modified backup is restored."),
+        TweakGroup(id: "Status Bar", icon: "antenna.radiowaves.left.and.right",
+                   footer: "Carrier name, fake 5G, signal bars, custom time text and per-item show/hide — written by the status bar override engine and delivered with Apply."),
         TweakGroup(id: "SpringBoard", icon: "square.grid.2x2", footer: nil),
         TweakGroup(id: "Daemons", icon: "gearshape.2",
                    footer: "Daemon toggles stage the same disabled-daemons list the desktop manages."),
@@ -25,6 +27,8 @@ struct AllTweaksView: View {
                     NavigationLink {
                         if group.id == "Custom Icons" {
                             IconThemesView()
+                        } else if group.id == "Status Bar" {
+                            StatusBarView()
                         } else {
                             TweakListView(group: group)
                         }
@@ -36,7 +40,7 @@ struct AllTweaksView: View {
                                 RowIcon(name: group.icon)
                             }
                             Spacer()
-                            Text("\(group.count)")
+                            Text("\(group.id == "Status Bar" ? StatusBarGroupHelper.activeCount : group.count)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }

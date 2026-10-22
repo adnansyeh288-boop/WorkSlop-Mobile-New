@@ -48,6 +48,10 @@ struct ApplyView: View {
                     preflightRow("Icon themes staged", ok: true,
                                  detail: "\(iconStage.staged.count)")
                 }
+                if statusBarSelection.isActive {
+                    preflightRow("Status bar overrides", ok: true,
+                                 detail: "\(statusBarSelection.overrides.activeCount)")
+                }
                 preflightRow("Build support", ok: BuildSupport.current != .unsupported,
                              detail: BuildSupport.current.displayText)
                 preflightRow("Pairing file imported", ok: status.pairingImported, detail: nil)
@@ -196,7 +200,18 @@ struct ApplyView: View {
     // MARK: - State
 
     private var canStart: Bool {
-        status.unlocked && (!selection.staged.isEmpty || !iconStage.staged.isEmpty)
+        status.unlocked && (!selection.staged.isEmpty || !iconStage.staged.isEmpty
+                            || statusBarSelection.isActive)
+    }
+
+    /// The stored status-bar selection the Status Bar page saved, in
+    /// engine shape. Empty (inactive) when the page was never used.
+    private var statusBarSelection: StatusBarSelection {
+        var loaded = StatusBarSelection()
+        if let stored = StatusBarPreferences.storedSelection() {
+            loaded.restore(from: stored)
+        }
+        return loaded
     }
 
     private var routeText: String {
@@ -247,7 +262,8 @@ struct ApplyView: View {
         for name in iconBuild.skipped {
             logLines.append("[WorkSlop] Icon theme skipped (pack artwork unreadable): \(name)")
         }
-        guard input.mappedFeatures > 0 || !iconBuild.payloads.isEmpty else {
+        let statusBar = statusBarSelection
+        guard input.mappedFeatures > 0 || !iconBuild.payloads.isEmpty || statusBar.isActive else {
             running = false
             result = .failed("Nothing deliverable is staged — none of the staged tweaks exist in the current engine and no icon theme could be built. Unstage them and pick from the current list.")
             return
@@ -290,7 +306,7 @@ struct ApplyView: View {
             do {
                 try await engine.applyTweaks(selection: input.selection,
                                              posterBoard: input.posterBoard,
-                                             statusBar: StatusBarSelection(),
+                                             statusBar: statusBar,
                                              deviceVersion: version,
                                              isIPhone: isIPhone,
                                              extraPayloads: iconBuild.payloads)
