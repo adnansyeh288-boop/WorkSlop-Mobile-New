@@ -32,6 +32,16 @@ struct StatusBarView: View {
             get: { selection.overrides.field(for: key) },
             set: { newValue in
                 selection.overrides.set(newValue, for: key)
+                // The reference turns the tweak on when any value is
+                // edited ("editing any value sets it" — see the
+                // StatusBarSelection model note). This port originally
+                // missed that, so a page full of edits with the master
+                // switch off delivered NOTHING, silently: the Apply
+                // button stayed disabled with nothing staged, and runs
+                // with staged tweaks logged "status bar off". Any edit
+                // now activates the selection; the master switch is the
+                // explicit way to turn it back off.
+                selection.enabled = true
                 persist()
             })
     }
@@ -44,7 +54,10 @@ struct StatusBarView: View {
                     Toggle("Enable status bar overrides", isOn: $selection.enabled)
                         .onChange(of: selection.enabled) { _, _ in persist() }
                     Toggle("Silly mode — show every item", isOn: $selection.overrides.sillyMode)
-                        .onChange(of: selection.overrides.sillyMode) { _, _ in persist() }
+                        .onChange(of: selection.overrides.sillyMode) { _, _ in
+                            selection.enabled = true
+                            persist()
+                        }
                 } header: {
                     Text("Status Bar Overrides")
                 } footer: {
@@ -77,9 +90,15 @@ struct StatusBarView: View {
 
                 Section {
                     Toggle("Show raw signal number", isOn: $selection.overrides.rawSignalShown)
-                        .onChange(of: selection.overrides.rawSignalShown) { _, _ in persist() }
+                        .onChange(of: selection.overrides.rawSignalShown) { _, _ in
+                            selection.enabled = true
+                            persist()
+                        }
                     Toggle("Show raw Wi-Fi signal number", isOn: $selection.overrides.rawWifiSignalShown)
-                        .onChange(of: selection.overrides.rawWifiSignalShown) { _, _ in persist() }
+                        .onChange(of: selection.overrides.rawWifiSignalShown) { _, _ in
+                            selection.enabled = true
+                            persist()
+                        }
                 } header: {
                     Text("Raw Signal")
                 } footer: {
@@ -222,6 +241,7 @@ struct StatusBarView: View {
                 case 2: selection.overrides.itemShown[item] = false
                 default: selection.overrides.itemShown[item] = nil
                 }
+                selection.enabled = true
                 persist()
             })) {
             Text("Stock").tag(0)

@@ -48,9 +48,17 @@ struct ApplyView: View {
                     preflightRow("Icon themes staged", ok: true,
                                  detail: "\(iconStage.staged.count)")
                 }
-                if statusBarSelection.isActive {
-                    preflightRow("Status bar overrides", ok: true,
-                                 detail: "\(statusBarSelection.overrides.activeCount)")
+                if statusBarSelection.isActive
+                    || statusBarSelection.overrides.activeCount > 0 {
+                    // Also shown when overrides exist but the selection
+                    // is OFF: that state used to be invisible here, so a
+                    // run could "succeed" while the status bar the user
+                    // set never left the phone.
+                    preflightRow("Status bar overrides",
+                                 ok: statusBarSelection.isActive,
+                                 detail: statusBarSelection.isActive
+                                     ? "\(statusBarSelection.overrides.activeCount)"
+                                     : "off — not delivered")
                 }
                 preflightRow("Build support", ok: BuildSupport.current != .unsupported,
                              detail: BuildSupport.current.displayText)

@@ -120,3 +120,10 @@ ride the engine's unchanged delivery (see Changes from upstream).
 [iTechExpertTwitter]: https://x.com/iTechExpert21
 [Mikasa-sanGitHub]: https://github.com/Mikasa-san
 [QuietDaemonGitHub]: https://github.com/Mikasa-san/QuietDaemon
+
+**Status-bar activation fix:** the reference turns the status-bar tweak
+on when any value is edited; the port missed that, so edits with the
+master switch off were saved but never delivered (Home Apply stayed
+disabled with nothing staged; runs logged "status bar off"). Every
+edit on the Status Bar page now activates the selection, and the Apply
+preflight shows an off-but-set status bar instead of hiding it.
