@@ -19,6 +19,7 @@ import SwiftUI
 struct ApplyView: View {
     @EnvironmentObject private var status: StatusStore
     @EnvironmentObject private var selection: SelectionStore
+    @EnvironmentObject private var iconStage: IconThemeStage
 
     @State private var running = false
     @State private var cancelling = false
@@ -43,6 +44,10 @@ struct ApplyView: View {
             Section {
                 preflightRow("Tweaks staged", ok: !selection.staged.isEmpty,
                              detail: "\(selection.staged.count)")
+                if !iconStage.staged.isEmpty {
+                    preflightRow("Icon themes staged", ok: true,
+                                 detail: "\(iconStage.staged.count)")
+                }
                 preflightRow("Pairing file imported", ok: status.pairingImported, detail: nil)
                 preflightRow("VPN tunnel detected", ok: status.vpnDetected, detail: nil)
             } header: {
@@ -189,7 +194,7 @@ struct ApplyView: View {
     // MARK: - State
 
     private var canStart: Bool {
-        status.unlocked && !selection.staged.isEmpty
+        status.unlocked && (!selection.staged.isEmpty || !iconStage.staged.isEmpty)
     }
 
     private var routeText: String {
@@ -220,6 +225,7 @@ struct ApplyView: View {
         BackendBootstrap.start()
 
         let input = GNSelectionBuilder.build(staged: selection.staged)
+        let iconBuild = WebClipPayloads.build(staged: iconStage.staged)
         running = true
         cancelling = false
         result = nil
@@ -233,9 +239,15 @@ struct ApplyView: View {
         if !input.droppedFeatureIDs.isEmpty {
             logLines.append("[WorkSlop] Not delivered (no longer offered): \(input.droppedFeatureIDs.joined(separator: ", "))")
         }
-        guard input.mappedFeatures > 0 else {
+        if !iconBuild.payloads.isEmpty {
+            logLines.append("[WorkSlop] Icon themes: \(iconBuild.payloads.count / 2) web clip(s) ride this apply.")
+        }
+        for name in iconBuild.skipped {
+            logLines.append("[WorkSlop] Icon theme skipped (pack artwork unreadable): \(name)")
+        }
+        guard input.mappedFeatures > 0 || !iconBuild.payloads.isEmpty else {
             running = false
-            result = .failed("None of the staged tweaks exist in the current engine — nothing was sent. Unstage them and pick from the current list.")
+            result = .failed("Nothing deliverable is staged — none of the staged tweaks exist in the current engine and no icon theme could be built. Unstage them and pick from the current list.")
             return
         }
 
@@ -278,7 +290,8 @@ struct ApplyView: View {
                                              posterBoard: input.posterBoard,
                                              statusBar: StatusBarSelection(),
                                              deviceVersion: version,
-                                             isIPhone: isIPhone)
+                                             isIPhone: isIPhone,
+                                             extraPayloads: iconBuild.payloads)
                 await MainActor.run {
                     finishRun()
                     logLines.append("[100%] Done — the engine finished and the device confirmed.")

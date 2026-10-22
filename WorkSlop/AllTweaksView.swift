@@ -13,6 +13,8 @@ struct AllTweaksView: View {
                    footer: "The desktop one-tap Recommended analytics set, as individual switches."),
         TweakGroup(id: "Apple Internal", icon: "hammer", footer: nil),
         TweakGroup(id: "PosterBoard", icon: "rectangle.on.rectangle", footer: nil),
+        TweakGroup(id: "Custom Icons", icon: "apps.iphone",
+                   footer: "The iOS 18 icon pack by catwithabaloon, delivered as Home Screen web clips — the original app icons are never modified."),
     ]
 
     var body: some View {
@@ -21,7 +23,11 @@ struct AllTweaksView: View {
             List {
                 ForEach(groups) { group in
                     NavigationLink {
-                        TweakListView(group: group)
+                        if group.id == "Custom Icons" {
+                            IconThemesView()
+                        } else {
+                            TweakListView(group: group)
+                        }
                     } label: {
                         HStack {
                             Label {
@@ -58,7 +64,8 @@ struct TweakGroup: Identifiable, Hashable {
     }
 
     var count: Int {
-        FeatureCatalog.features(in: catalogSection).count
+        if id == "Custom Icons" { return IOS18IconCatalog.all.count }
+        return FeatureCatalog.features(in: catalogSection).count
     }
 }
 

@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     let demoScreen: String?
     @StateObject private var selection = SelectionStore()
+    @StateObject private var iconStage = IconThemeStage()
     @StateObject private var status = StatusStore()
     @StateObject private var updater = UpdateChecker()
 
@@ -15,6 +16,7 @@ struct ContentView: View {
     var body: some View {
         MainMenuView(demoScreen: demoScreen)
             .environmentObject(selection)
+            .environmentObject(iconStage)
             .environmentObject(status)
             .task {
                 await updater.check()

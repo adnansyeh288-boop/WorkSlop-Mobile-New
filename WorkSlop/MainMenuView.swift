@@ -15,6 +15,7 @@ struct MainMenuView: View {
     let demoScreen: String?
     @EnvironmentObject private var status: StatusStore
     @EnvironmentObject private var selection: SelectionStore
+    @EnvironmentObject private var iconStage: IconThemeStage
     @State private var path: [HomeRoute] = []
     @State private var importing = false
     @State private var pairingNote: String?
@@ -217,15 +218,15 @@ struct MainMenuView: View {
     }
 
     private var canApply: Bool {
-        status.unlocked && !selection.staged.isEmpty
+        status.unlocked && (!selection.staged.isEmpty || !iconStage.staged.isEmpty)
     }
 
     private var applyLabel: String {
-        let total = selection.staged.count
+        let total = selection.staged.count + iconStage.staged.count
         if total == 0 { return "Apply (stage tweaks first)" }
         if !status.pairingImported { return "Apply (import pairing file first)" }
         if !status.vpnDetected { return "Apply (VPN tunnel not detected)" }
-        return "Apply (\(total) tweaks)"
+        return "Apply (\(total) staged)"
     }
 
     // MARK: - Menus

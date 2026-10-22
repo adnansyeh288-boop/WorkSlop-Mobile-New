@@ -10,12 +10,9 @@ struct SettingsView: View {
             SkyBackground()
             List {
                 Section {
-                LabeledContent("Version", value: "15.0")
+                LabeledContent("Version", value: "2.0")
                 LabeledContent("This device's iOS", value: DeviceInfoEx.fullVersion)
-                Text("iOS 26 and below: Partial restore (sparse restore, no wipe). iOS 27: Full backup → modify → restore with all data - the WorkSlop Desktop method.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Text("Find My must be OFF before an apply and back ON afterwards - same rule as the desktop.")
+                Text("iOS 26: Partial restore (sparse restore, no wipe). iOS 27: a protective backup of all data is taken first, the tweaks are injected into it, and the modified backup is restored.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Text("A running restore cannot be cancelled mid-flight. If it stalls, turn off the VPN tunnel, then force-restart (Volume Up, Volume Down, hold Side button).")
@@ -31,6 +28,9 @@ struct SettingsView: View {
             Section {
                 LabeledContent("Developer", value: "adnan.120hz")
                 Link("TikTok @adnan.120hz", destination: URL(string: "https://www.tiktok.com/@adnan.120hz")!)
+                Text("Beta testers: Charlie, rfrz1d_, Davy (@Davydavpn), uggtx, Fayaz")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 Text("iOS 18 icon pack: catwithabaloon (v2.0)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -39,11 +39,11 @@ struct SettingsView: View {
             }
 
             Section {
-                Text("WorkSlop Mobile is free software, licensed under the GNU General Public License v3.0 or later.")
+                Text("WorkSlop Mobile is free software, licensed under the GNU Affero General Public License v3.0 or later.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Link("Read the full license (GPL-3.0)",
-                     destination: URL(string: "https://www.gnu.org/licenses/gpl-3.0.html")!)
+                Link("Read the full license (AGPL-3.0)",
+                     destination: URL(string: "https://www.gnu.org/licenses/agpl-3.0.html")!)
             } header: {
                 Text("License")
             }

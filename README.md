@@ -33,8 +33,6 @@ is WorkSlop's own; the GoldenNugget UI is not used. Licensed under
 These WorkSlop features have **no engine in GoldenNugget-mobile** and were
 removed rather than left as dead UI:
 
-- **Custom Icons / Icon Themes** (the iOS 18 icon pack flow) — not ported
-  upstream.
 - **PosterBoard Templates (`.batter`)** — not ported upstream. `.tendies`
   wallpapers and the three PosterBoard reset modes remain.
 - **AirFlit** (AirCard passcode themes + Wallet images) — removed by
@@ -45,6 +43,11 @@ removed rather than left as dead UI:
 Everything else in the UI (Liquid Glass, SpringBoard, Internal Options,
 Daemons incl. Recommended set, PosterBoard) maps 1:1 onto specs in the GN
 TweakCatalog.
+
+**Icon Themes came back the same day** (v2.0): upstream has no icon-theme
+spec, but the feature is WebClip files — plain payloads at a HomeDomain
+path — so it is implemented as a WorkSlop payload producer whose files
+ride the engine's unchanged delivery (see Changes from upstream).
 
 ## Changes from upstream
 
@@ -57,6 +60,11 @@ TweakCatalog.
   driven from the upstream `DaemonGroups.all` data.
 - Bootstrap sequence extracted from the upstream app's views into
   `BackendBootstrap` so the WorkSlop UI can start the same stack.
+- `GoldenNuggetEngine.applyTweaks` gained a defaulted `extraPayloads`
+  parameter: caller-built `TweakPayload`s appended to the same delivery
+  list the compiled tweaks use. Used by Icon Themes (WebClip folders in
+  HomeDomain, the desktop's delivery shape). No upstream delivery code
+  changed.
 
 ## Credits
 

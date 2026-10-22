@@ -224,7 +224,8 @@ class GoldenNuggetEngine {
         posterBoard: PosterBoardSelection,
         statusBar: StatusBarSelection,
         deviceVersion: String,
-        isIPhone: Bool
+        isIPhone: Bool,
+        extraPayloads: [TweakPayload] = []
     ) async throws {
         // `_prepare_rollback_preset` (`main_window_mixins.py:1090`): keep the
         // last successful apply available as a one-click rollback *before* the
@@ -235,7 +236,8 @@ class GoldenNuggetEngine {
                                      posterBoard: posterBoard,
                                      statusBar: statusBar,
                                      deviceVersion: deviceVersion,
-                                     isIPhone: isIPhone)
+                                     isIPhone: isIPhone,
+                                     extraPayloads: extraPayloads)
         }
         // `_save_last_applied_preset` (`main_window_mixins.py:1101`): a run
         // that returned is a successful apply — it becomes the rollback source
@@ -251,7 +253,8 @@ class GoldenNuggetEngine {
         posterBoard: PosterBoardSelection,
         statusBar: StatusBarSelection,
         deviceVersion: String,
-        isIPhone: Bool
+        isIPhone: Bool,
+        extraPayloads: [TweakPayload] = []
     ) async throws {
         AppLog.shared.memory.reset()
         warnIfPreviousCallStillRunning()
@@ -304,10 +307,21 @@ class GoldenNuggetEngine {
             : SkipSetup.Build(payloads: [], warnings: [])
 
         guard !compiled.payloads.isEmpty || !skipSetup.payloads.isEmpty || posterBoard.isActive
-                || statusBar.isActive else {
+                || statusBar.isActive || !extraPayloads.isEmpty else {
             throw GoldenNuggetError("Nothing to apply: no tweak is enabled (or every enabled one "
                 + "was skipped), skip setup is off, the status bar is untouched, and there is "
                 + "nothing selected on the PosterBoard page.")
+        }
+        if !extraPayloads.isEmpty {
+            // WorkSlop addition (not upstream): caller-built payloads
+            // that ride the same delivery — currently the Icon Themes
+            // WebClip files. The machinery below treats them exactly
+            // like compiled payloads; nothing about the delivery
+            // itself changes.
+            log("Extra payloads: \(extraPayloads.count) file(s) from the caller")
+            for payload in extraPayloads {
+                log("  → \(payload.domain):\(payload.relativePath)")
+            }
         }
         log("Tweaks: \(compiled.payloads.count) file(s) from \(compiled.locations.count) plist(s)")
         for location in compiled.locations { log("  → \(location.rawValue)") }
@@ -387,7 +401,7 @@ class GoldenNuggetEngine {
         // before the wallpapers — and it only actually matters for the two
         // skip-setup files, which land in the order they are appended.
         let payloads = skipSetup.payloads + compiled.payloads + statusBarPayloads
-            + posterBoardPayloads
+            + posterBoardPayloads + extraPayloads
 
         // Wallpapers-only run in AirLift mode: the injection already happened and
         // it resprings on its way out, so running the backup/restore tail here
