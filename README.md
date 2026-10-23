@@ -76,8 +76,12 @@ On iOS 26 everything listed under Features is active.
   synthetic partial-restore path. There is **no automatic reboot** and
   **no backup-password / Find My step** in this engine — an encrypted
   device backup fails fast instead.
-- Pairing file (`.plist` from `idevicepair pair`) is imported once in the
-  app and stored in the app container, same as before.
+- Pairing file comes in two ways. On **iOS 27** it is generated inside
+  WorkSlop itself — Get Pairing File pairs the app as the host (turn on
+  Developer Mode, pair with host, enter the PIN). On **iOS 26** the
+  `.plist` is created on a computer with `idevicepair pair`, iLoader or
+  similar tools and imported into the app. Either way it is set up once
+  and stored in the app container.
 
 ## Features removed in the 2026-10-22 migration
 
