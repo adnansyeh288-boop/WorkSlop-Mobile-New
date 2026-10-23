@@ -127,7 +127,10 @@ enum GNMapping {
         "sb-hide-ac-power": ["SBHideACPower"],
         "sb-never-breadcrumb": ["SBNeverBreadcrumb"],
         "sb-supervision-text": ["SBShowSupervisionTextOnLockScreen"],
+        "sb-lock-screen-footnote": ["LockScreenFootnote"],
         "sb-icon-parallax": ["SBDisableIconParallax"],
+        "sb-disable-dynamic-island": ["HideDICompletely"],
+        "sb-disable-fly-in": ["SBDisableIconFlyInAnimation"],
         // Daemons (spec id is "Daemon.<group name>")
         "dm-clear-screentime": ["ClearScreenTimeAgentPlist"],
         "dm-thermalmonitord": ["Daemon.thermalmonitord"],
@@ -284,6 +287,19 @@ enum GNSelectionBuilder {
                                 "SolariumCornerRadius": .int(CornerRadiusStore.value),
                                 "SolariumInsetsAndCornerRadiusEnabled": .bool(true),
                             ],
+                            for: spec)
+                    }
+                    // The footnote spec is a single-key text spec: the
+                    // compiler writes the selection's staged value, so
+                    // override it with the text the user saved in the
+                    // editor (FootnoteStore), like the corner radius
+                    // above overrides its spec's values.
+                    if id == "sb-lock-screen-footnote",
+                       let spec = specs.first(where: { $0.id == "LockScreenFootnote" }) {
+                        input.selection.restore(
+                            enabled: true,
+                            value: .string(FootnoteStore.text),
+                            multiValues: nil,
                             for: spec)
                     }
                     input.mappedFeatures += 1

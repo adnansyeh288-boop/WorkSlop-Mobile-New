@@ -158,13 +158,20 @@ struct SliderBar: View {
                 }
                 .padding(.horizontal, 5)
                 .padding(.vertical, 5)
-                .animation(liquidSpring, value: selection)
+                // No `.animation` of the bar's own here: the shell's
+                // one spring (on `page`, in MainMenuView) drives the
+                // switch, pill included. A second spring of the bar's
+                // own made the pill run on a different curve from the
+                // pages it switches between.
             }
             .onChange(of: selection) { newValue in
+                // Scroll only — the pill itself is animated by the
+                // shell's spring. There is deliberately no `onAppear`
+                // scroll: the bars are persistent shell chrome now,
+                // and the old unanimated appear-time `scrollTo` was a
+                // horizontal snap on every page switch, back when each
+                // page rebuilt its own bars.
                 withAnimation(liquidSpring) { proxy.scrollTo(newValue, anchor: .center) }
-            }
-            .onAppear {
-                proxy.scrollTo(selection, anchor: .center)
             }
         }
         .background {
@@ -195,8 +202,29 @@ struct SliderBar: View {
 /// background and chrome are untouched and carry the switch from
 /// frame one. The delay is all this does — no content is altered,
 /// cached, or kept resident.
+///
+/// The one refinement: a page that has already paid its first build
+/// once does not pay it again. Pages are destroyed and recreated on
+/// every switch (the shell keeps exactly one alive), so without a
+/// memory the 40 ms pop-in repeated on EVERY switch, forever, on
+/// content that had long since been built. A keyed mount remembers
+/// — process-lifetime only, it is a set of strings — and later
+/// visits mount immediately. First visits keep the deferral, which
+/// is the frame it exists to protect.
 struct DeferredMount: ViewModifier {
-    @State private var mounted = false
+    /// Process-lifetime set of keys whose content has mounted once.
+    private static var warmedKeys: Set<String> = []
+
+    /// Identifies the content across page recreations. Nil keeps the
+    /// original behaviour: defer on every mount.
+    let memoryKey: String?
+
+    @State private var mounted: Bool
+
+    init(memoryKey: String? = nil) {
+        self.memoryKey = memoryKey
+        _mounted = State(initialValue: memoryKey.map { Self.warmedKeys.contains($0) } ?? false)
+    }
 
     func body(content: Content) -> some View {
         Group {
@@ -207,8 +235,11 @@ struct DeferredMount: ViewModifier {
             }
         }
         .task {
-            try? await Task.sleep(for: .milliseconds(40))
-            mounted = true
+            if !mounted {
+                try? await Task.sleep(for: .milliseconds(40))
+                mounted = true
+            }
+            if let memoryKey { Self.warmedKeys.insert(memoryKey) }
         }
     }
 }
@@ -216,8 +247,10 @@ struct DeferredMount: ViewModifier {
 extension View {
     /// See `DeferredMount`: mount this content one beat after its
     /// page, so a page transition never pays its first-build cost.
-    func deferredMount() -> some View {
-        modifier(DeferredMount())
+    /// Pass a stable `memoryKey` for content that is rebuilt on every
+    /// page switch: the deferral then applies to the first visit only.
+    func deferredMount(memoryKey: String? = nil) -> some View {
+        modifier(DeferredMount(memoryKey: memoryKey))
     }
 }
 
@@ -255,13 +288,24 @@ struct PageHeader: View {
 /// The floating chrome over a slider page: header + top slider at
 /// the top, bottom slider at the bottom. The page itself (with its
 /// own SkyBackground) shows through everywhere else.
+///
+/// ONE persistent instance of this sits at shell level, above the
+/// switching pages (see MainMenuView): it is never part of a page's
+/// own subtree, so it never cross-fades, remounts, or rebuilds its
+/// sliders on a switch — the title simply changes. Home passes
+/// `showsHeader: false`: it has its own hero instead of a page
+/// header, and a back-to-Home button on Home itself would be a
+/// control that does nothing. Its sliders are the shared ones here.
 struct ShellChrome: View {
     let title: String
+    var showsHeader: Bool = true
     @Binding var page: MainPage
 
     var body: some View {
         VStack(spacing: 10) {
-            PageHeader(title: title) { page = .home }
+            if showsHeader {
+                PageHeader(title: title) { page = .home }
+            }
             SliderBar(pages: MainPage.topGroup, selection: $page)
             Spacer()
             SliderBar(pages: MainPage.bottomGroup, selection: $page)

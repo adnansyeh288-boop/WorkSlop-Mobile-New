@@ -330,6 +330,22 @@ private extension ClosedRange where Bound == Int {
     func clamp(_ v: Int) -> Int { Swift.min(Swift.max(v, lowerBound), upperBound) }
 }
 
+/// The user-typed Lock Screen Footnote text.
+///
+/// Stored in UserDefaults like the corner radius; the selection
+/// builder reads it when the footnote feature is staged and
+/// overrides the spec's staged string with it at apply time. An
+/// empty string means no footnote is staged (the editor un-stages
+/// the feature when the saved text is empty).
+enum FootnoteStore {
+    private static let key = "lockScreenFootnoteText"
+
+    static var text: String {
+        get { UserDefaults.standard.string(forKey: key) ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+}
+
 enum FeatureCatalog {
     /// The engine's support line: iOS 26+. Per-tweak version bounds
     /// are the GN specs' own min/max — the rows read them through
@@ -351,6 +367,13 @@ enum FeatureCatalog {
     /// not offered here.
     static let all: [Feature] = [
         // --- Liquid Glass (regular set, partial restore) ---
+        // Force Solarium Fallback leads the section (owner's order,
+        // 2026-10-23): it renders as the first tweak row directly
+        // under the page's preview card. Catalog order here is
+        // display order only — staging and delivery do not read it.
+        Feature(id: "lg-force-fallback", title: "Force Solarium Fallback",
+                subtitle: "SolariumForceFallback", section: "Liquid Glass",
+                route: .partialRestore, window: ios26Only),
         Feature(id: "lg-disallow-clock", title: "Disallow Glass on LS Clock",
                 subtitle: "SBDisallowGlassTime", section: "Liquid Glass",
                 route: .partialRestore, window: gnLine),
@@ -420,9 +443,6 @@ enum FeatureCatalog {
         Feature(id: "lg-corner-radius", title: "Flat Square Corners",
                 subtitle: "SolariumCornerRadius — a number you set (0 = square) + InsetsAndCornerRadiusEnabled", section: "Liquid Glass",
                 route: .partialRestore, window: gnLine),
-        Feature(id: "lg-force-fallback", title: "Force Solarium Fallback",
-                subtitle: "SolariumForceFallback", section: "Liquid Glass",
-                route: .partialRestore, window: ios26Only),
         Feature(id: "lg-disable-hs-exterior", title: "Disable Home Screen Glass Exterior",
                 subtitle: "SolariumEnableHomeScreenExteriorEffects = false", section: "Liquid Glass",
                 route: .partialRestore, window: ios26Only),
@@ -473,8 +493,17 @@ enum FeatureCatalog {
         Feature(id: "sb-supervision-text", title: "Show Supervision Text on Lock Screen",
                 subtitle: "SBShowSupervisionTextOnLockScreen", section: "SpringBoard",
                 route: .partialRestore, window: gnLine),
+        Feature(id: "sb-lock-screen-footnote", title: "Lock Screen Footnote",
+                subtitle: "LockScreenFootnote", section: "SpringBoard",
+                route: .partialRestore, window: gnLine),
         Feature(id: "sb-icon-parallax", title: "Disable Icon Parallax",
                 subtitle: "SBDisableParallax", section: "SpringBoard",
+                route: .partialRestore, window: gnLine),
+        Feature(id: "sb-disable-dynamic-island", title: "Disable Dynamic Island",
+                subtitle: "SBSuppressDynamicIslandCompletely", section: "SpringBoard",
+                route: .partialRestore, window: gnLine),
+        Feature(id: "sb-disable-fly-in", title: "Disable Icon Fly-In Animation",
+                subtitle: "SBDisableIconFlyInAnimation", section: "SpringBoard",
                 route: .partialRestore, window: gnLine),
         // --- Daemons (disabled.plist, partial restore) ---
         Feature(id: "dm-recommended",

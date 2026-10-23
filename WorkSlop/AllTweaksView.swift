@@ -81,6 +81,17 @@ struct TweakListView: View {
     let group: TweakGroup
     var embedded = false
     @EnvironmentObject private var selection: SelectionStore
+    /// The corner-radius number the Flat Square Corners row shows.
+    /// The store is UserDefaults, which nothing observes, so a body
+    /// that read it directly kept showing the pre-edit value after
+    /// the editor popped back — the tweak looked unsaved when it
+    /// was saved all along. Refreshed from the store on every
+    /// appear, which includes the pop back from the editor.
+    @State private var cornerRadiusShown = CornerRadiusStore.value
+    /// The saved Lock Screen Footnote text, refreshed on appear for
+    /// the same reason as the corner radius above — the store is
+    /// UserDefaults, which nothing observes.
+    @State private var footnoteShown = FootnoteStore.text
 
     var body: some View {
         ZStack {
@@ -112,13 +123,32 @@ struct TweakListView: View {
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(feature.title)
-                                    Text("SolariumCornerRadius = \(CornerRadiusStore.value) (tap to set the number)")
+                                    Text("SolariumCornerRadius = \(cornerRadiusShown) (tap to set the number)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(2)
                                 }
                             }
                             .accessibilityIdentifier("nav-corner-radius")
+                        } else if feature.id == "sb-lock-screen-footnote" {
+                            // The footnote is text the user types, so
+                            // its row opens the text editor instead of
+                            // a plain toggle — same shape as the
+                            // corner-radius row above.
+                            NavigationLink {
+                                FootnoteView()
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(feature.title)
+                                    Text(footnoteShown.isEmpty
+                                         ? "LockScreenFootnote (tap to set the text)"
+                                         : "LockScreenFootnote = \u{201C}\(footnoteShown)\u{201D}")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .accessibilityIdentifier("nav-lock-screen-footnote")
                         } else {
                             FeatureToggleRow(feature: feature)
                         }
@@ -141,9 +171,13 @@ struct TweakListView: View {
             }
             .scrollContentBackground(.hidden)
             .modifier(ShellListInsets(enabled: embedded))
-            .deferredMount()
+            .deferredMount(memoryKey: "tweaklist-\(group.id)")
         }
         .navigationTitle(embedded ? "" : group.id)
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            cornerRadiusShown = CornerRadiusStore.value
+            footnoteShown = FootnoteStore.text
+        }
     }
 }

@@ -2407,6 +2407,30 @@ enum TweakCatalog {
             detail: "Stops Home Screen icons from shifting with the device tilt (the parallax effect). Pair with Disable Icon Page-Control Parallax for a fully static Home Screen.",
             multiValues: nil
         ),
+        // WorkSlop addition (not a registry row): the key WorkSlop
+        // Desktop writes, in the same .GlobalPreferences file the
+        // Desktop uses. Structural hypothesis — the key sits in
+        // SpringBoard's preference surface, but the effect is not
+        // device-proven yet, and the detail says so.
+        TweakSpec(
+            id: "SBDisableIconFlyInAnimation",
+            section: .springboard,
+            title: "Disable Icon Fly-In Animation",
+            location: .globalPreferences,
+            key: "SBDisableIconFlyInAnimation",
+            value: .bool(true),
+            kind: .toggle,
+            minValue: 0.0,
+            maxValue: 999.0,
+            step: 1.0,
+            minVersion: nil,
+            maxVersion: nil,
+            iphoneOnly: false,
+            ipadOnly: false,
+            disabled: false,
+            detail: "Turns off the cascade animation that flies Home Screen icons in when the Home Screen appears. The same key WorkSlop Desktop writes; not device-proven yet.",
+            multiValues: nil
+        ),
         TweakSpec(
             id: "SBHideSearchAffordance",
             section: .springboard,

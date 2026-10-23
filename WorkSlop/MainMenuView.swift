@@ -79,34 +79,51 @@ struct MainMenuView: View {
     /// The page switch: exactly one page is alive at a time, like
     /// the old push navigation — pages are never stacked or kept
     /// resident side by side.
+    ///
+    /// The chrome (page header + both sliders) is NOT part of any
+    /// page: one persistent `ShellChrome` floats above the switching
+    /// content and never remounts. It used to be rebuilt inside every
+    /// page (`pageShell`), so on a switch the outgoing page's title
+    /// and sliders cross-faded against the incoming page's identical
+    /// copies — two headers and four sliders on screen mid-fade, and
+    /// each slider's pill restarted in its fresh bar (owner's video,
+    /// 2026-10-23). Now only the page content cross-fades, underneath
+    /// chrome that simply stays where it is; the title changes with
+    /// the page and the pills move inside bars that were never
+    /// destroyed. The shell's spring is the one animation on `page`,
+    /// for the content fade and the pills alike.
     private var shell: some View {
-        Group {
-            switch page {
-            case .home:
-                homePage
-                    .transition(pageTransition)
-            case .iconThemes:
-                pageShell(title: MainPage.iconThemes.title) {
+        ZStack {
+            Group {
+                switch page {
+                case .home:
+                    homePage
+                        .transition(pageTransition)
+                case .iconThemes:
                     IconThemesView(embedded: true)
-                }
-                .transition(pageTransition)
-            case .statusBar:
-                pageShell(title: MainPage.statusBar.title) {
+                        .transition(pageTransition)
+                case .statusBar:
                     StatusBarView(embedded: true)
-                }
-                .transition(pageTransition)
-            case .liquidGlass, .recommend, .springBoard, .appleInternal, .daemons, .posterBoard:
-                if let group = page.tweakGroup {
-                    pageShell(title: group.id) {
+                        .transition(pageTransition)
+                case .liquidGlass, .recommend, .springBoard, .appleInternal, .daemons, .posterBoard:
+                    if let group = page.tweakGroup {
                         TweakListView(group: group, embedded: true)
+                            .transition(pageTransition)
+                    } else {
+                        EmptyView()
                     }
-                    .transition(pageTransition)
-                } else {
-                    EmptyView()
                 }
             }
+            ShellChrome(title: chromeTitle, showsHeader: page != .home, page: $page)
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.95), value: page)
+    }
+
+    /// The header title over the current page: the catalog group's
+    /// own name for tweak pages ("Recommended", not the slider's
+    /// shorter "Recommend"), the page's title for the rest.
+    private var chromeTitle: String {
+        page.tweakGroup?.id ?? page.title
     }
 
     /// Page changes cross-fade instead of cutting hard (owner's fix,
@@ -127,18 +144,15 @@ struct MainMenuView: View {
         .opacity
     }
 
-    /// A tweak page: the page's own view (with its own SkyBackground)
-    /// fills the screen; the header + sliders float over it.
-    private func pageShell<Content: View>(title: String,
-                                          @ViewBuilder content: () -> Content) -> some View {
-        ZStack {
-            content()
-            ShellChrome(title: title, page: $page)
-        }
-    }
-
+    /// The Home page's content. Its sliders are the shell's shared
+    /// chrome now (they used to be a bar inside this scroll view and
+    /// a second bar overlaid at the bottom — two more bars rebuilt
+    /// per switch, and the in-scroll one scrolled away with the
+    /// content). The hero and cards are unchanged; the scroll view
+    /// only gains a top inset so the hero starts below the floating
+    /// top slider instead of underneath it.
     private var homePage: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             SkyBackground()
             ScrollView {
                 VStack(spacing: 16) {
@@ -146,7 +160,6 @@ struct MainMenuView: View {
                     if BuildSupport.current == .partial {
                         partialSupportCard
                     }
-                    SliderBar(pages: MainPage.topGroup, selection: $page)
                     deviceCard
                     applyButton
                     menusCard
@@ -158,6 +171,7 @@ struct MainMenuView: View {
                 }
                 .padding()
             }
+            .safeAreaInset(edge: .top) { Color.clear.frame(height: 46) }
             .onChange(of: wireless.phase) { newPhase in
                 // The library wrote a fresh record to the canonical
                 // path: adopt it through the same validation an
@@ -177,9 +191,6 @@ struct MainMenuView: View {
                     }
                 }
             }
-            SliderBar(pages: MainPage.bottomGroup, selection: $page)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 6)
         }
     }
 

@@ -12,6 +12,7 @@ import SwiftUI
 struct CornerRadiusView: View {
     @EnvironmentObject private var selection: SelectionStore
     @EnvironmentObject private var status: StatusStore
+    @Environment(\.dismiss) private var dismiss
     @State private var value: Int = CornerRadiusStore.value
     @State private var text: String = String(CornerRadiusStore.value)
 
@@ -49,12 +50,30 @@ struct CornerRadiusView: View {
                                 text = String(new)
                                 commit(new)
                             }
+                        // The explicit save (owner's ask, 2026-10-23):
+                        // a round button that commits what the field
+                        // shows and leaves the page, so "saved" is a
+                        // thing the user did, not a thing they hope
+                        // happened. A cleared or invalid field does
+                        // not silently diverge — saving re-reads the
+                        // store, so the controls end up showing the
+                        // value that is actually saved.
+                        Button(action: saveAndDismiss) {
+                            Image(systemName: "checkmark")
+                                .font(.footnote.weight(.bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                                .background { Circle().fill(Color.accentColor) }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("corner-radius-save")
+                        .accessibilityLabel("Save corner radius")
                     }
                     .disabled(!status.unlocked)
                 } header: {
                     Text("Liquid Glass Corner Radius")
                 } footer: {
-                    Text("Type the radius by hand or use the stepper (0–60). 0 = fully square corners. The value is saved as you type and is written with the next Apply, together with the SolariumInsetsAndCornerRadiusEnabled flag — the same pair the desktop writes.")
+                    Text("Type the radius by hand or use the stepper (0–60). 0 = fully square corners. The value is saved as you type — or tap the round checkmark to save and go back — and is written with the next Apply, together with the SolariumInsetsAndCornerRadiusEnabled flag — the same pair the desktop writes.")
                 }
             }
             .scrollContentBackground(.hidden)
@@ -67,5 +86,19 @@ struct CornerRadiusView: View {
         let clamped = CornerRadiusStore.range.contains(n) ? n : (n < 0 ? 0 : 60)
         value = clamped
         CornerRadiusStore.value = clamped
+    }
+
+    /// The round save button: commit what the field currently shows
+    /// (clamped, like every other commit on this page), then re-sync
+    /// both controls from the store — a field the user cleared holds
+    /// no number, commits nothing, and must snap back to the saved
+    /// value rather than sit empty next to a store that says
+    /// otherwise — and leave the page.
+    private func saveAndDismiss() {
+        let digits = text.filter(\.isNumber)
+        if let n = Int(digits) { commit(n) }
+        value = CornerRadiusStore.value
+        text = String(CornerRadiusStore.value)
+        dismiss()
     }
 }
