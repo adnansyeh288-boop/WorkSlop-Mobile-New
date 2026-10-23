@@ -380,6 +380,7 @@ struct IconThemesView: View {
             }
             .scrollContentBackground(.hidden)
             .modifier(ShellListInsets(enabled: embedded))
+            .deferredMount()
         }
         .navigationTitle(embedded ? "" : "Icon Themes")
         .navigationBarTitleDisplayMode(.inline)

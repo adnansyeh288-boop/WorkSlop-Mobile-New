@@ -141,6 +141,7 @@ struct TweakListView: View {
             }
             .scrollContentBackground(.hidden)
             .modifier(ShellListInsets(enabled: embedded))
+            .deferredMount()
         }
         .navigationTitle(embedded ? "" : group.id)
         .navigationBarTitleDisplayMode(.inline)

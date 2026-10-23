@@ -381,6 +381,16 @@ public final class MobileBackup2BackupContext: @unchecked Sendable {
         commitLock.unlock()
     }
 
+    /// The final placeholder ledger, for the gateway's integrity gate:
+    /// how many stand-ins were created, how many creations FAILED, and
+    /// how many are still outstanding (in the set, awaiting
+    /// `cleanupPlaceholders`). Read the outstanding count BEFORE
+    /// cleanup — cleanup drains the set it reports on.
+    func placeholderLedger() -> (created: Int, failures: Int, outstanding: Int) {
+        placeholderLock.lock(); defer { placeholderLock.unlock() }
+        return (placeholderCount, placeholderFailures, placeholders.count)
+    }
+
     /// Emitted right after the device accepted (or rejected) the request, so the
     /// numbers are visible even when the run then fails.
     ///

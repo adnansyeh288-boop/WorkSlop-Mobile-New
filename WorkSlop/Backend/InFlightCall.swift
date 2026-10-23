@@ -18,14 +18,19 @@ import Foundation
 //   * `StallGuard.run` calls `enter()` / `defer leave()` around the guarded call,
 //     and `noteAbandoned(label:)` on the one path that abandons it (the operator's
 //     cancel).  So `isBusy` is now truthful.
-//   * `GoldenNuggetEngine.warnIfPreviousCallStillRunning()` reads it at the start of a
-//     run and logs the state — it does NOT block, and nothing waits for a drain.
+//   * `GoldenNuggetEngine.refuseIfPreviousCallStillRunning()` reads it at the start
+//     of a run and REFUSES to start while a call is in flight (updated
+//     2026-10-23 — it warned, logs only, until then).
 //
-// The absence of a drain wait is deliberate rather than forgotten.  With the
+// The absence of a drain wait was deliberate rather than forgotten.  With the
 // automatic timeouts gone (see `StallGuard`), a cancel is the only way a call is
 // abandoned, and an abandoned FFI read may never drain at all — so gating the next
 // run on it would turn "press Stop" into "press Stop, then force-quit the app".
-// Warning keeps the dangerous window visible without adding that failure.  The
+// Warning kept the dangerous window visible without adding that failure — until
+// the 2026-10-23 iOS 27 tester run showed what the window actually costs: a
+// second run sharing the first run's backup tree, deleting its files mid-stream,
+// and a device verdict of MBErrorDomain/205. The refusal replaced the warning;
+// force-quitting is now the documented way out when a call never drains.  The
 // other half of the original hazard — `recover()` invalidating the adapter
 // underneath a call still in flight — is closed by the same change that removed
 // the timeouts: the retry ladder can now only be entered by an error the FFI

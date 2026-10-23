@@ -179,6 +179,48 @@ struct SliderBar: View {
     }
 }
 
+/// Mounts a page's heavy content a beat AFTER the page itself is on
+/// screen, so a page switch's cross-fade starts with only the page's
+/// SkyBackground and the shell chrome animating.
+///
+/// Every slider page is `ZStack { SkyBackground; List }`: the List's
+/// first body build (rows, thumbnails, preview cards) used to land
+/// synchronously inside the transition's first frame — on the main
+/// thread, while the outgoing page (Home, the heaviest: a scroll
+/// view full of material cards) was also still rendering — and the
+/// fade stuttered from its first frames, worst leaving Home
+/// (owner's report, 2026-10-23). With the content mounted ~40 ms
+/// in, the page is still nearly transparent, so the content joins
+/// the fade already in progress instead of stalling it; the
+/// background and chrome are untouched and carry the switch from
+/// frame one. The delay is all this does — no content is altered,
+/// cached, or kept resident.
+struct DeferredMount: ViewModifier {
+    @State private var mounted = false
+
+    func body(content: Content) -> some View {
+        Group {
+            if mounted {
+                content
+            } else {
+                Color.clear
+            }
+        }
+        .task {
+            try? await Task.sleep(for: .milliseconds(40))
+            mounted = true
+        }
+    }
+}
+
+extension View {
+    /// See `DeferredMount`: mount this content one beat after its
+    /// page, so a page transition never pays its first-build cost.
+    func deferredMount() -> some View {
+        modifier(DeferredMount())
+    }
+}
+
 /// Page header for the slider pages: a white circle with a black
 /// chevron (iOS 26 style) returns to Home; the title is centered.
 struct PageHeader: View {

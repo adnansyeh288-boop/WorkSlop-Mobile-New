@@ -257,7 +257,7 @@ class GoldenNuggetEngine {
         extraPayloads: [TweakPayload] = []
     ) async throws {
         AppLog.shared.memory.reset()
-        warnIfPreviousCallStillRunning()
+        try refuseIfPreviousCallStillRunning()
         clearCancel()
         clearProgress()
         let runStage = StageTimer("RUN apply")
@@ -480,7 +480,7 @@ class GoldenNuggetEngine {
 
     private func fetchPosterBoardDatabaseRun() async throws {
         AppLog.shared.memory.reset()
-        warnIfPreviousCallStillRunning()
+        try refuseIfPreviousCallStillRunning()
         clearCancel()
         clearProgress()
         let stage = StageTimer("RUN posterboard database fetch")
@@ -520,7 +520,7 @@ class GoldenNuggetEngine {
     private func applyPosterBoardViaAirliftRun(_ selection: PosterBoardSelection,
                                                deviceVersion: String) async throws {
         AppLog.shared.memory.reset()
-        warnIfPreviousCallStillRunning()
+        try refuseIfPreviousCallStillRunning()
         clearCancel()
         clearProgress()
         let stage = StageTimer("RUN posterboard airlift apply")
@@ -656,7 +656,7 @@ class GoldenNuggetEngine {
 
     private func resetPagesRun(pages: Set<ResetPage>) async throws {
         AppLog.shared.memory.reset()
-        warnIfPreviousCallStillRunning()
+        try refuseIfPreviousCallStillRunning()
         clearCancel()
         clearProgress()
         let runStage = StageTimer("RUN page reset")
@@ -773,7 +773,7 @@ class GoldenNuggetEngine {
     private func removeAppliedTweaksRun(locations: Set<TweakFileLocation>,
                                         includeStatusBar: Bool) async throws {
         AppLog.shared.memory.reset()
-        warnIfPreviousCallStillRunning()
+        try refuseIfPreviousCallStillRunning()
         clearCancel()
         clearProgress()
         let runStage = StageTimer("RUN remove tweaks")
@@ -863,7 +863,7 @@ class GoldenNuggetEngine {
     //
     // The full flow, kept in one place because the order is load-bearing.
 
-    /// Stage 1: the working backup, into `<Documents>/<udid>/`.
+    /// Stage 1: the working backup, into this run's own tree.
     ///
     /// A Partial Restore, so it is built rather than pulled: an empty device
     /// directory, then the host-side manifests, then this run's rows and
@@ -871,17 +871,15 @@ class GoldenNuggetEngine {
     /// is why the reference's three-phase flow (and its safe-state recovery) has
     /// no part here on iOS 26 -- the restore lands on the live device.
     private func partialRestore(udid: String) async throws -> URL {
-        let backupRoot = AppPaths.fullBackupRoot(udid: udid)
-        try resetDirectory(backupRoot)
-        log("Partial Restore: synthesising backup at \(backupRoot.lastPathComponent) "
-            + "(no device content pulled)")
+        let backupRoot = try freshRunRoot(udid: udid)
+        log("Partial Restore: synthesising backup in this run's own tree "
+            + "(\(backupRoot.lastPathComponent), no device content pulled)")
         return backupRoot
     }
 
-    /// A real protective backup into `<Documents>/<udid>/`.
+    /// A real protective backup into this run's own tree.
     private func protectiveBackup(udid: String) async throws -> URL {
-        let backupRoot = AppPaths.fullBackupRoot(udid: udid)
-        try resetDirectory(backupRoot)
+        let backupRoot = try freshRunRoot(udid: udid)
         try await ProtectiveBackup.run(backupRoot: backupRoot, udid: udid) { overall in
             self.logProgress("backup progress", overall)
         }
@@ -889,35 +887,94 @@ class GoldenNuggetEngine {
         return backupRoot
     }
 
+    /// This run's private backup tree, created empty, with every previous
+    /// run's tree swept away.
+    ///
+    /// Until 2026-10-23 every run shared `<Documents>/<udid>/` and reset it on
+    /// entry — which is how a second run, started while a cancelled first run
+    /// was still streaming into the same tree, deleted that run's files
+    /// mid-backup and earned MBErrorDomain/205 from the device. A tree per
+    /// run makes that structurally impossible: this run's `resetDirectory`
+    /// touches only a directory no other run has ever seen, and the sweep
+    /// below only ever removes trees whose runs are over.
+    ///
+    /// The sweep is safe for the same reason the start gate is: a run reaches
+    /// here only when `refuseIfPreviousCallStillRunning` has established that
+    /// no device call is in flight in this process, so no swept tree can
+    /// still be streaming. A tree modified in the last minute is left alone
+    /// anyway — belt and braces against a bookkeeping surprise, at the cost
+    /// of one stale tree surviving until the next run.
+    private func freshRunRoot(udid: String) throws -> URL {
+        let root = AppPaths.runBackupRoot(udid: udid, runID: UUID().uuidString)
+        sweepStaleRunRoots(udid: udid)
+        try resetDirectory(root)
+        return root
+    }
+
+    /// Delete every previous run's backup tree for this device, plus the
+    /// legacy shared tree at `<Documents>/<udid>` left behind by builds from
+    /// before per-run roots.
+    private func sweepStaleRunRoots(udid: String) {
+        let fm = FileManager.default
+        var candidates: [URL] = []
+        if let children = try? fm.contentsOfDirectory(
+            at: AppPaths.runsDir(udid: udid), includingPropertiesForKeys: nil) {
+            candidates += children
+        }
+        candidates.append(AppPaths.fullBackupRoot(udid: udid))
+        for url in candidates {
+            if let modified = (try? url.resourceValues(
+                forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+               Date().timeIntervalSince(modified) < 60 {
+                continue
+            }
+            try? fm.removeItem(at: url)
+        }
+    }
+
     // MARK: - Shared run plumbing
     //
     // The sequence below is order-sensitive, so it lives in one place.
 
     /// A run must not start on top of one that was cancelled but is still
-    /// running, and this makes that state visible.
+    /// running, and this REFUSES to let it.
     ///
     /// A blocking FFI call cannot be interrupted, so Stop only walks away from
     /// it — and `clearCancel()` at the top of a run clears the very flag that
     /// was going to make the abandoned call unwind. A second mobilebackup2
-    /// exchange started in that window is two sessions on one RSD adapter, which
-    /// is the hazard `InFlightCall` exists to record.
+    /// exchange started in that window is two sessions on one RSD adapter,
+    /// which is the hazard `InFlightCall` exists to record.
     ///
-    /// This WARNS rather than blocks, deliberately. Blocking is the safer
-    /// default, but an abandoned call may never drain at all, which would turn
-    /// "press Stop" into "press Stop, then force-quit the app" — a worse failure
-    /// than the one it prevents. The state is logged instead, so it is never
-    /// invisible; adding a drain wait here is the trade to revisit if that
-    /// ever looks wrong.
+    /// This used to WARN rather than block, on the reasoning that an abandoned
+    /// call might never drain and blocking would turn "press Stop" into
+    /// "press Stop, then force-quit the app". The 2026-10-23 iOS 27 tester run
+    /// proved that trade wrong: a second run started while the first was still
+    /// streaming, the two shared one per-UDID backup tree, the new run's
+    /// `resetDirectory` deleted the old run's files mid-stream, and the device
+    /// rejected the first run's backup with MBErrorDomain/205 ("Manifest
+    /// references files not in backup") — 8,422 committed files skipped, 7,871
+    /// placeholders never drained. A corrupted run plus a baffled tester is
+    /// worse than a force-quit, so the refusal is now the behaviour, and the
+    /// error says plainly that force-quitting is the way out if the call never
+    /// drains. Per-run backup trees (see `protectiveBackup`) are the second
+    /// half of the same fix: even a future path that reaches a tree while
+    /// another run streams can no longer delete that run's files.
     ///
     /// Must run BEFORE `clearCancel()`: clearing first erases the signal the
     /// previous run is still waiting on.
-    private func warnIfPreviousCallStillRunning() {
+    private func refuseIfPreviousCallStillRunning() throws {
         guard InFlightCall.shared.isBusy else { return }
         log("⚠️ a previous device call is still running "
-            + "(\(InFlightCall.shared.abandonedDescription)) — starting a new run on top of it. "
-            + "If that call was cancelled it may still hold the session, so a failure from here that "
-            + "looks like a device problem may be two sessions sharing one RSD adapter: force-quit "
-            + "the app, then run again.")
+            + "(\(InFlightCall.shared.abandonedDescription)) — refusing to start a new run on "
+            + "top of it: two mobilebackup2 sessions sharing one device is what ended the "
+            + "2026-10-23 iOS 27 test run with MBErrorDomain/205.")
+        throw GoldenNuggetError("""
+            A previous operation is still running on the device. It was \
+            stopped on screen, but a device call cannot be interrupted once \
+            it has started — it has to finish on its own, so a new run must \
+            not start on top of it. Wait until it ends, then run again. If \
+            it never ends, force-quit the app and reopen it.
+            """)
     }
 
     /// Everything a run does before touching the device.
@@ -935,6 +992,7 @@ class GoldenNuggetEngine {
         log("UDID: \(udid)")
         log("Tunnel: \(Tunnel.describe())")
         try await Diagnostics.preflightBackupEncryption()
+        try await Diagnostics.preflightDeviceUnlocked()
         // Everything after this byte offset is this run's Rust output.
         markRustLog()
 

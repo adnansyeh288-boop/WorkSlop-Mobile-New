@@ -122,6 +122,7 @@ struct StatusBarView: View {
             }
             .scrollContentBackground(.hidden)
             .modifier(ShellListInsets(enabled: embedded))
+            .deferredMount()
         }
         .navigationTitle(embedded ? "" : "Status Bar")
         .navigationBarTitleDisplayMode(.inline)

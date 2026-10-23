@@ -106,14 +106,25 @@ struct MainMenuView: View {
                 }
             }
         }
-        .animation(.spring(response: 0.5, dampingFraction: 0.9), value: page)
+        .animation(.spring(response: 0.38, dampingFraction: 0.95), value: page)
     }
 
-    /// Page changes cross-fade with a whisper of scale instead of
-    /// cutting hard (owner's fix, 2026-10-22: transitions felt
-    /// stiff). Paired with the shell's spring on `page`.
+    /// Page changes cross-fade instead of cutting hard (owner's fix,
+    /// 2026-10-22: transitions felt stiff). Paired with the shell's
+    /// spring on `page`.
+    ///
+    /// Opacity ONLY since 2026-10-23 (owner: transitions still not
+    /// smooth enough, worst from Home): the old whisper of scale
+    /// (0.98) forced every material surface on BOTH pages — the
+    /// ultra-thin cards, the glass sliders, the two animated skies —
+    /// to re-rasterise at a changing scale on every frame of the
+    /// fade, which is exactly where the frames went. A pure opacity
+    /// cross-fade composites what is already rendered. The heavy
+    /// half of the fix is on the pages: their lists now mount a beat
+    /// after the page itself (see `DeferredMount`), so a first
+    /// body build never lands inside the transition's first frame.
     private var pageTransition: AnyTransition {
-        .opacity.combined(with: .scale(scale: 0.98))
+        .opacity
     }
 
     /// A tweak page: the page's own view (with its own SkyBackground)

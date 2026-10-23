@@ -3411,6 +3411,7 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI {
             // references files not in backup". Only now is it safe to remove
             // them (pymobiledevice3's `cleanup_discarded_files()` runs in the
             // same place — a `finally` right after `dl_loop()`).
+            let ledgerBeforeCleanup = ctx.placeholderLedger()
             let standInsRemoved = ctx.cleanupPlaceholders()
             delegateLog?(ctx.placeholderSummary(removed: standInsRemoved))
             if let err = err {
@@ -3418,6 +3419,41 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI {
                 debugLog("[IdeviceGateway] syncBackupBackup() mobilebackup2_backup failed: \(msg)")
                 defer { idevice_error_free(err) }
                 throw IdeviceGatewayError(.serviceError, reason: "Backup failed, error: (\(msg))")
+            }
+            // Host-side integrity gate, filtered backups only. The stand-in
+            // ledger must balance exactly: a creation failure means payloads
+            // the device named may never have existed as files, and a stand-in
+            // cleanup could not remove means a file vanished outside this
+            // session's accounting — in the 2026-10-23 incident that was a
+            // second run deleting this run's backup tree mid-stream, and the
+            // device's own verdict for it was MBErrorDomain/205. Fail here,
+            // with the counts, before the run goes on to prune, inject and
+            // restore on top of a backup whose provenance is broken. (A
+            // skipped MOVE stays tolerated: the delegate documents why, and
+            // the prune drops those rows.)
+            if shouldPreserve != nil {
+                if ledgerBeforeCleanup.failures > 0 {
+                    self.safeFreePlist(response)
+                    throw IdeviceGatewayError(
+                        .serviceError,
+                        reason: "Backup integrity check failed: \(ledgerBeforeCleanup.failures) "
+                            + "placeholder file(s) could not be created on the host, so the backup "
+                            + "may be incomplete (the device usually rejects such a backup with "
+                            + "MBErrorDomain/205). Nothing was restored.")
+                }
+                if standInsRemoved < ledgerBeforeCleanup.outstanding {
+                    self.safeFreePlist(response)
+                    throw IdeviceGatewayError(
+                        .serviceError,
+                        reason: "Backup integrity check failed: "
+                            + "\(ledgerBeforeCleanup.outstanding - standInsRemoved) placeholder "
+                            + "file(s) disappeared from the backup folder during the backup — "
+                            + "another run or process interfered with this run's files. Nothing "
+                            + "was restored.")
+                }
+                delegateLog?("backup integrity: stand-in ledger balanced "
+                    + "(\(ledgerBeforeCleanup.created) created, "
+                    + "\(standInsRemoved) removed)")
             }
             // The device's verdict, read before the plist is freed — the
             // backup path never looked at it, so a backup the device ended

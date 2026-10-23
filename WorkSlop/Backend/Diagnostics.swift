@@ -156,4 +156,42 @@ enum Diagnostics {
                          + "— continuing, but note that an encrypted backup breaks prune/inject")
         }
     }
+
+    /// Whether the device reports itself locked, from lockdown's base-domain
+    /// `DeviceLocked` value.
+    ///
+    /// - Returns: `true`/`false`, or `nil` when the device could not be asked
+    ///   (a firmware that does not publish the key, a read error). An
+    ///   unreadable value must never block a run on its own.
+    static func deviceLocked() async -> Bool? {
+        guard let gateway = Minimuxer.shared().ideviceGateway else { return nil }
+        return try? await gateway.getLockdownBool(key: "DeviceLocked", domain: "")
+    }
+
+    /// Fail fast when the device says it is locked.
+    ///
+    /// mobilebackup2 refuses to work against a locked device and says so only
+    /// at the END of a long exchange (MBErrorDomain/208, "Device locked") —
+    /// the 2026-10-23 tester log has two Remove runs die that way, after the
+    /// full setup cost, looking for all the world like an app bug. When
+    /// lockdown publishes the state up front, spend one query instead of the
+    /// whole run. When it does not, continue exactly as before: this is a
+    /// courtesy check, not a gate with a false refuse of its own.
+    static func preflightDeviceUnlocked() async throws {
+        switch await deviceLocked() {
+        case .some(true):
+            throw GoldenNuggetError("""
+                The device is locked. mobilebackup2 will not work against a \
+                locked device — it refuses at the end of the run with \
+                MBErrorDomain/208 ("Device locked") rather than at the start.
+                Unlock the device, keep it awake for the whole run, then run again.
+                """)
+        case .some(false):
+            AppLog.write("preflight: device reports unlocked (DeviceLocked = false)")
+        case .none:
+            AppLog.write("preflight: DeviceLocked could not be read (lockdown did "
+                         + "not publish it) — continuing; a locked device will "
+                         + "still refuse mid-run with MBErrorDomain/208")
+        }
+    }
 }
