@@ -63,13 +63,14 @@ On iOS 26 everything listed under Features is active.
 
 - **2026-10-22 — backend replaced.** The previous home-grown Swift/FFI
   tweak engine did not work reliably, so it was removed entirely and
-  replaced with the GoldenNugget-mobile backend (`GoldenNuggetEngine`,
+  replaced with the upstream engine backend (`GoldenNuggetEngine`,
   TweakCatalog specs, Minimuxer/EMProxy tunnel, AirliftFFI PosterBoard).
   The WorkSlop UI was kept and rewired to that engine
   (`BackendAdapter.swift`, `BackendBootstrap.swift`).
-- **Supported devices: iOS 26.0 and newer only** (the GN backend requires
-  the iOS 26 SDK surface). The app says so on unsupported versions.
-- Apply flow (from the GN engine, unchanged): tweaks are compiled to
+- **Supported devices: iOS 26.0 through iOS 27.0.1 and newer** (the
+  engine requires the iOS 26 SDK surface). The app says so on
+  unsupported versions.
+- Apply flow (from the engine, unchanged): tweaks are compiled to
   payloads, PosterBoard is applied via Airlift or backup fetch, iOS 27+
   first takes a protective mobilebackup2 backup, iOS 26 uses the
   synthetic partial-restore path. There is **no automatic reboot** and
@@ -80,19 +81,19 @@ On iOS 26 everything listed under Features is active.
 
 ## Features removed in the 2026-10-22 migration
 
-These WorkSlop features have **no engine in GoldenNugget-mobile** and were
-removed rather than left as dead UI:
+These WorkSlop features have **no counterpart in the upstream app** and
+were removed rather than left as dead UI:
 
 - **PosterBoard Templates (`.batter`)** — not ported upstream. `.tendies`
   wallpapers and the three PosterBoard reset modes remain.
 - **AirFlit** (AirCard passcode themes + Wallet images) — removed by
   decision; not part of this build.
-- One Liquid Glass legibility toggle whose key does not exist in the GN
-  backend.
+- One Liquid Glass legibility toggle whose key does not exist in the
+  upstream backend.
 
 Everything else in the UI (Liquid Glass, SpringBoard, Internal Options,
-Daemons incl. Recommended set, PosterBoard) maps 1:1 onto specs in the GN
-TweakCatalog.
+Daemons incl. Recommended set, PosterBoard) maps 1:1 onto specs in the
+engine's TweakCatalog.
 
 **Icon Themes came back the same day** (v2.0): upstream has no icon-theme
 spec, but the feature is WebClip files — plain payloads at a HomeDomain
