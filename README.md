@@ -101,10 +101,11 @@ ride the engine's unchanged delivery (see Changes from upstream).
 
 ## Changes from upstream
 
-- Replaced the GoldenNugget UI with the WorkSlop UI (SwiftUI); only the
-  backend (`Nugget/Core`, tunnel stack, vendored Minimuxer / IDevice /
-  AirliftFFI frameworks) is imported, unmodified except for project
-  integration.
+- The interface is WorkSlop's own original UI (SwiftUI), designed and
+  built for this app — no upstream interface is used or replaced; only
+  the backend (`Nugget/Core`, tunnel stack, vendored Minimuxer /
+  IDevice / AirliftFFI frameworks) is imported, unmodified except for
+  project integration.
 - App identity: bundle `com.adnan120hz.workslop`, name "WorkSlop".
 - Feature catalogue presented in WorkSlop's grouping; daemon groups are
   driven from the upstream `DaemonGroups.all` data.
