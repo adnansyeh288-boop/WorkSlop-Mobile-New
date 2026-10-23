@@ -31,12 +31,19 @@ struct TweakPayload: Equatable {
     /// `contents` is set.  The file has to still exist when the injector runs —
     /// the caller owns it, and this type never deletes it.
     let source: URL?
+    /// An explicit row owner for the injected file row, overriding the
+    /// injector profile's default.  Added for the fork `TweakInjector`
+    /// taken in the 2026-10-23 method swap: no WorkSlop producer sets
+    /// it, so it is nil everywhere and the injector falls back to the
+    /// profile owner exactly as before the swap.
+    let owner: Int?
 
-    init(domain: String, relativePath: String, contents: Data) {
+    init(domain: String, relativePath: String, contents: Data, owner: Int? = nil) {
         self.domain = domain
         self.relativePath = TweakPayload.manifestPath(relativePath)
         self.contents = contents
         self.source = nil
+        self.owner = owner
     }
 
     init(domain: String, relativePath: String, source: URL) {
@@ -44,6 +51,7 @@ struct TweakPayload: Equatable {
         self.relativePath = TweakPayload.manifestPath(relativePath)
         self.contents = Data()
         self.source = source
+        self.owner = nil
     }
 
     /// A manifest row's `relativePath`, with no leading slash.

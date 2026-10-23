@@ -31,38 +31,8 @@ enum AppPaths {
     /// itself, so anything parked here would be dropped on the next apply.
     static let mediaStore = URL.documents.appendingPathComponent("Media", conformingTo: .data)
 
-    /// `<Documents>/<udid>/` — the LEGACY working-backup location, one tree
-    /// per device, shared by every run.
-    ///
-    /// No run writes here any more (2026-10-23): two runs sharing one tree is
-    /// what corrupted the 2026-10-23 iOS 27 tester run — the second run's
-    /// `resetDirectory` deleted the first run's files while its backup was
-    /// still streaming into them, and the device answered MBErrorDomain/205.
-    /// Kept only so the run-start sweep knows what to delete; see
-    /// `runBackupRoot(udid:runID:)`.
     static func fullBackupRoot(udid: String) -> URL {
         URL.documents.appendingPathComponent(udid, conformingTo: .data)
-    }
-
-    /// `<Documents>/Runs/<udid>/` — the parent of every per-run backup tree
-    /// for one device.
-    static func runsDir(udid: String) -> URL {
-        URL.documents.appendingPathComponent("Runs", conformingTo: .data)
-            .appendingPathComponent(udid, conformingTo: .data)
-    }
-
-    /// `<Documents>/Runs/<udid>/<runID>/` — ONE run's working backup tree,
-    /// nobody else's.
-    ///
-    /// A run creates its tree under a fresh UUID and hands the URL down the
-    /// whole pipeline (prune, inject, restore all take `backupRoot` as a
-    /// parameter), so a tree is only ever written by the run that owns it.
-    /// The next run sweeps the previous trees instead of resetting a shared
-    /// one — and it can only start once no device call is in flight
-    /// (`refuseIfPreviousCallStillRunning`), so a swept tree is never one a
-    /// call is still streaming into.
-    static func runBackupRoot(udid: String, runID: String) -> URL {
-        runsDir(udid: udid).appendingPathComponent(runID, conformingTo: .data)
     }
 
     /// `<Documents>/Baseline/<udid>/` — the retained pull the next run diffs
@@ -89,6 +59,26 @@ enum AppPaths {
     /// about to read it.
     static let posterBoardFetchRoot = URL.documents
         .appendingPathComponent("PosterBoardFetch", conformingTo: .data)
+
+    /// `<Documents>/Templates/Work/` — where a `.batter` template's tree is
+    /// unpacked before its options rewrite it and the result becomes payloads.
+    ///
+    /// Separate from `PosterBoard.workDirectory` because a PosterBoard-domain
+    /// template is unpacked **into** that one (so the wallpaper walk finds it),
+    /// and mixing the two would have a template's own files picked up as a pack.
+    static let templatesWorkDirectory = URL.documents
+        .appendingPathComponent("Templates/Work", conformingTo: .data)
+
+    /// `<Documents>/TemplateChoices/` — where a `replace` option's picked file is
+    /// kept until the apply reads it.
+    ///
+    /// Its own directory because the files are transient by nature: a template's
+    /// chosen image belongs to one template and one apply, and keeping the ones
+    /// a user tried and abandoned would leave hundreds of megabytes behind with
+    /// nothing pointing at them. TemplateChoices reclaims older sessions when
+    /// a new file is picked, keeping current-session inputs intact for Apply.
+    static let templateChoices = URL.documents
+        .appendingPathComponent("TemplateChoices", conformingTo: .data)
 
     /// `<backupRoot>/<udid>/` — the per-device directory inside a backup root.
     static func deviceDir(backupRoot: URL, udid: String) -> URL {

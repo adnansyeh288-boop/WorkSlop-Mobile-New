@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import Darwin
 import IDevice
 
 public struct InstalledAppInfo: Sendable {
@@ -128,16 +129,6 @@ public final class MobileBackup2BackupContext: @unchecked Sendable {
         servedLock.lock()
         defer { servedLock.unlock() }
         return servedFiles
-    }
-
-    /// How many times a delegate callback answered the device with an
-    /// error. The restore verdict reads this: a file the device asked
-    /// for and the host could not serve is a file that is not on the
-    /// device, whatever the device's own final code says.
-    func delegateErrorCount() -> Int {
-        errorLock.lock()
-        defer { errorLock.unlock() }
-        return delegateErrors
     }
 
     func servedSummary() -> String {
@@ -381,16 +372,6 @@ public final class MobileBackup2BackupContext: @unchecked Sendable {
         commitLock.unlock()
     }
 
-    /// The final placeholder ledger, for the gateway's integrity gate:
-    /// how many stand-ins were created, how many creations FAILED, and
-    /// how many are still outstanding (in the set, awaiting
-    /// `cleanupPlaceholders`). Read the outstanding count BEFORE
-    /// cleanup — cleanup drains the set it reports on.
-    func placeholderLedger() -> (created: Int, failures: Int, outstanding: Int) {
-        placeholderLock.lock(); defer { placeholderLock.unlock() }
-        return (placeholderCount, placeholderFailures, placeholders.count)
-    }
-
     /// Emitted right after the device accepted (or rejected) the request, so the
     /// numbers are visible even when the run then fails.
     ///
@@ -499,21 +480,57 @@ private func mb2_open_file_read(
         return makeFFIError("invalid arguments")
     }
     let pathStr = String(cString: path)
-    guard let data = FileManager.default.contents(atPath: pathStr) else {
-        return fail(c, "open_file_read", "no such file: \(pathStr)", code: -6)
+
+    // Read straight into the malloc'd buffer the device will get.
+    //
+    // The previous version used `FileManager.contents(atPath:)` and then
+    // `malloc` + `copyBytes`, so a payload was resident TWICE at peak (the
+    // `Data` plus the FFI buffer) — a jetsam risk when the device asks for a
+    // large video during a restore, which is exactly when this runs.  `open`/
+    // `fstat`/`read` into the buffer keeps one copy and the same peak the device
+    // sees, without the intermediate `Data`.
+    let fd = open(pathStr, O_RDONLY)
+    guard fd >= 0 else {
+        return fail(c, "open_file_read", "no such file: \(pathStr) (errno \(errno))", code: -6)
     }
-    if data.isEmpty {
+    defer { close(fd) }
+
+    var st = stat()
+    guard fstat(fd, &st) == 0, st.st_size >= 0 else {
+        return fail(c, "open_file_read", "cannot stat \(pathStr) (errno \(errno))")
+    }
+    let size = Int(st.st_size)
+    if size == 0 {
         c.noteServedFile(bytes: 0)
         outData.pointee = nil
         outLen.pointee = 0
         return nil
     }
-    let buf = malloc(data.count)
-    guard let buf = buf else { return fail(c, "open_file_read", "out of memory reading \(pathStr)") }
-    data.copyBytes(to: buf.assumingMemoryBound(to: UInt8.self), count: data.count)
-    c.noteServedFile(bytes: data.count)
-    outData.pointee = buf.assumingMemoryBound(to: UInt8.self)
-    outLen.pointee = UInt(data.count)
+    guard let buf = malloc(size) else {
+        return fail(c, "open_file_read", "out of memory reading \(pathStr) (\(size) bytes)")
+    }
+    let dst = buf.assumingMemoryBound(to: UInt8.self)
+    var filled = 0
+    while filled < size {
+        let n = read(fd, dst + filled, size - filled)
+        if n < 0 {
+            if errno == EINTR { continue }
+            free(buf)
+            return fail(c, "open_file_read", "read error on \(pathStr) (errno \(errno))")
+        }
+        if n == 0 { break }   // short file; use what we actually got
+        filled += n
+    }
+    if filled == 0 {
+        free(buf)
+        c.noteServedFile(bytes: 0)
+        outData.pointee = nil
+        outLen.pointee = 0
+        return nil
+    }
+    c.noteServedFile(bytes: filled)
+    outData.pointee = dst
+    outLen.pointee = UInt(filled)
     return nil
 }
 

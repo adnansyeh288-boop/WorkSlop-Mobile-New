@@ -50,10 +50,17 @@ struct ManifestStore {
         defer { sqlite3_close(db) }
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
-        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM Files", -1, &stmt, nil) == SQLITE_OK else {
+        let prepareRC = sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM Files", -1, &stmt, nil)
+        guard prepareRC == SQLITE_OK else {
+            ManifestStore.sqlFailure("rowCount: prepare SELECT COUNT(*) FROM Files", db, prepareRC)
             return 0
         }
-        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int64(stmt, 0)) : 0
+        let stepRC = sqlite3_step(stmt)
+        if stepRC != SQLITE_ROW {
+            ManifestStore.sqlFailure("rowCount: step SELECT COUNT(*) FROM Files", db, stepRC)
+            return 0
+        }
+        return Int(sqlite3_column_int64(stmt, 0))
     }
 
     /// Delete every `Files` row of one domain and return how many were removed.
@@ -64,15 +71,25 @@ struct ManifestStore {
     /// the device those files are unknown (by dropping the rows) makes it upload
     /// them again instead of answering "unchanged, do not send".
     func dropRows(domain: String) -> Int {
+        dumpPreModificationDiagnostics()
         guard let db = try? open() else { return 0 }
         defer { sqlite3_close(db) }
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
-        guard sqlite3_prepare_v2(db, "DELETE FROM Files WHERE domain = ?", -1, &stmt, nil) == SQLITE_OK else {
+        let prepareRC = sqlite3_prepare_v2(db, "DELETE FROM Files WHERE domain = ?", -1, &stmt, nil)
+        guard prepareRC == SQLITE_OK else {
+            ManifestStore.sqlFailure("dropRows: prepare DELETE for domain \(domain)", db, prepareRC)
             return 0
         }
-        sqlite3_bind_text(stmt, 1, domain, -1, ManifestSchema.transient)
-        guard sqlite3_step(stmt) == SQLITE_DONE else { return 0 }
+        let bindRC = sqlite3_bind_text(stmt, 1, domain, -1, ManifestSchema.transient)
+        if bindRC != SQLITE_OK {
+            ManifestStore.sqlFailure("dropRows: bind domain \(domain)", db, bindRC)
+        }
+        let stepRC = sqlite3_step(stmt)
+        guard stepRC == SQLITE_DONE else {
+            ManifestStore.sqlFailure("dropRows: step DELETE for domain \(domain)", db, stepRC)
+            return 0
+        }
         return Int(sqlite3_changes(db))
     }
 
@@ -100,13 +117,129 @@ struct ManifestStore {
 
     // MARK: - Opening
 
+    /// Root-cause logging for every SQLite failure on the pulled manifest
+    /// (ordered 2026-10-23, after a tester run died at the first `INSERT`
+    /// with the real result code thrown away): the operation, the primary
+    /// AND extended result codes, and SQLite's own message — the three
+    /// facts that distinguish READONLY (8, extended 1544 for a read-only
+    /// directory) from BUSY (5) from IOERR (10) from CORRUPT (11).
+    /// Failure-safe by construction: it only reads C state and writes to
+    /// the log, so it can never throw or alter control flow.
+    static func sqlFailure(_ operation: String, _ db: OpaquePointer?, _ rc: Int32) {
+        let extended = db.map { sqlite3_extended_errcode($0) } ?? rc
+        let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "(no database handle)"
+        AppLog.write("sqlite FAILURE: \(operation) — rc=\(rc) extended=\(extended) "
+            + "errmsg=\"\(message)\"")
+    }
+
     /// Open the manifest, or throw if the file is not there.
     private func open() throws -> OpaquePointer {
         var db: OpaquePointer?
-        guard sqlite3_open(dbPath, &db) == SQLITE_OK, let db else {
+        let rc = sqlite3_open(dbPath, &db)
+        guard rc == SQLITE_OK, let db else {
+            ManifestStore.sqlFailure("open Manifest.db", db, rc)
+            if let db { sqlite3_close(db) }
             throw GoldenNuggetError("Failed to open Manifest.db at \(dbPath)")
         }
+        // After every open of the pulled manifest (2026-10-23 logging
+        // order): record whether SQLite itself considers the file
+        // writable. `1` here would end the READONLY investigation on the
+        // spot; `-1` means SQLite has no such database name open.
+        let readonly = sqlite3_db_readonly(db, dbPath)
+        AppLog.write("sqlite: opened Manifest.db — sqlite3_db_readonly=\(readonly) "
+            + "(0 = read-write, 1 = read-only, -1 = no such database)")
         return db
+    }
+
+    /// Paths whose pre-modification dump has already been written this
+    /// process. `upsert` opens a fresh connection per row, so without
+    /// this guard the dump would repeat for every injected payload.
+    private static var preModificationDumped = Set<String>()
+
+    /// One-shot forensic dump, taken BEFORE the first modification of a
+    /// pulled Manifest.db in this process (`pruneToDiskState`, `upsert`,
+    /// or `dropRows` — whichever comes first): the header fields that
+    /// decide writability, the full schema, and the filesystem facts
+    /// (permissions, writability, journal siblings) that distinguish a
+    /// read-only file from a read-only directory from a WAL-mode
+    /// database. Never throws; a failure inside the dump is logged, not
+    /// propagated.
+    func dumpPreModificationDiagnostics() {
+        guard !ManifestStore.preModificationDumped.contains(dbPath) else { return }
+        ManifestStore.preModificationDumped.insert(dbPath)
+        let fm = FileManager.default
+        var lines: [String] = ["sqlite pre-modification dump for \(dbPath)"]
+        // Header (SQLite file format: bytes 16–17 = page size, big-endian,
+        // 1 meaning 65536; byte 18 = file format write version, byte 19 =
+        // read version — 1 = legacy rollback journal, 2 = WAL; bytes
+        // 28–31 = database size in pages). Expected vs actual byte count
+        // is the truncation check for a partially pulled database.
+        if let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: dbPath)) {
+            defer { try? handle.close() }
+            let header = handle.readData(ofLength: 100)
+            if header.count >= 100 {
+                let pageSizeRaw = Int(header[16]) << 8 | Int(header[17])
+                let pageSize = pageSizeRaw == 1 ? 65536 : pageSizeRaw
+                let pageCount = Int(header[28]) << 24 | Int(header[29]) << 16
+                    | Int(header[30]) << 8 | Int(header[31])
+                let fileSize = ((try? fm.attributesOfItem(atPath: dbPath))?[.size]
+                    as? NSNumber)?.int64Value ?? -1
+                lines.append("  header: pageSize=\(pageSize) writeVersion=\(header[18]) "
+                    + "readVersion=\(header[19]) pageCount=\(pageCount) "
+                    + "expectedBytes=\(pageSize * pageCount) actualBytes=\(fileSize)")
+            } else {
+                lines.append("  header: only \(header.count) byte(s) readable — not a full header")
+            }
+        } else {
+            lines.append("  header: unreadable (Manifest.db missing or not readable)")
+        }
+        // Filesystem facts for the file and its parent folder: a database
+        // in a non-writable folder cannot create its rollback journal and
+        // fails writes with SQLITE_READONLY (extended 1544) even when the
+        // file itself is writable.
+        for (label, path) in [("Manifest.db", dbPath), ("parent folder", deviceDir.path)] {
+            let attrs = try? fm.attributesOfItem(atPath: path)
+            let size = (attrs?[.size] as? NSNumber)?.int64Value ?? -1
+            let perms = (attrs?[.posixPermissions] as? NSNumber)?.intValue ?? -1
+            lines.append("  \(label): size=\(size) "
+                + "posix=\(perms >= 0 ? String(perms, radix: 8) : "unknown") "
+                + "isWritableFile=\(fm.isWritableFile(atPath: path))")
+        }
+        for suffix in ["-journal", "-wal", "-shm"] {
+            let sibling = dbPath + suffix
+            if fm.fileExists(atPath: sibling) {
+                let size = ((try? fm.attributesOfItem(atPath: sibling))?[.size]
+                    as? NSNumber)?.int64Value ?? -1
+                lines.append("  sibling \(suffix): present (\(size) bytes)")
+            } else {
+                lines.append("  sibling \(suffix): absent")
+            }
+        }
+        // The full schema, through the normal open path.
+        if let db = try? open() {
+            defer { sqlite3_close(db) }
+            var stmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, "SELECT type, name, sql FROM sqlite_master ORDER BY name",
+                                  -1, &stmt, nil) == SQLITE_OK, let stmt {
+                defer { sqlite3_finalize(stmt) }
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let type = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? "?"
+                    let name = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? "?"
+                    let sql = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? "NULL"
+                    lines.append("  schema: \(type) \(name): \(sql)")
+                }
+                let tail = sqlite3_errcode(db)
+                if tail != SQLITE_OK {
+                    ManifestStore.sqlFailure("pre-modification dump: step sqlite_master", db, tail)
+                }
+            } else {
+                ManifestStore.sqlFailure("pre-modification dump: prepare sqlite_master",
+                                         db, sqlite3_errcode(db))
+            }
+        } else {
+            lines.append("  schema: could not open Manifest.db (the open failure is logged above)")
+        }
+        for line in lines { AppLog.write(line) }
     }
 
     // MARK: - Writing rows
@@ -114,32 +247,47 @@ struct ManifestStore {
     /// Insert (or replace) one file row.
     func upsert(fileID: String, domain: String, relativePath: String,
                 flags: Int32, blob: Data) throws {
+        dumpPreModificationDiagnostics()
         let db = try open()
         defer { sqlite3_close(db) }
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, ManifestSchema.insertOrReplaceRow, -1, &stmt, nil) == SQLITE_OK,
-              let stmt else {
+        let prepareRC = sqlite3_prepare_v2(db, ManifestSchema.insertOrReplaceRow, -1, &stmt, nil)
+        guard prepareRC == SQLITE_OK, let stmt else {
+            ManifestStore.sqlFailure("upsert: prepare INSERT for \(domain)/\(relativePath)",
+                                     db, prepareRC)
             throw GoldenNuggetError("Manifest.db: failed to prepare INSERT for \(domain)/\(relativePath)")
         }
         defer { sqlite3_finalize(stmt) }
 
+        // Bind results were silently discarded before the 2026-10-23
+        // logging pass; the first failing bind is now logged (the step
+        // below still runs, exactly as it did when binds were unchecked).
+        var bindFailure: (index: Int32, rc: Int32)?
+        func noteBind(_ index: Int32, _ rc: Int32) {
+            if rc != SQLITE_OK, bindFailure == nil { bindFailure = (index, rc) }
+        }
         fileID.withCString { cID in
             domain.withCString { cDom in
                 relativePath.withCString { cRel in
-                    sqlite3_bind_text(stmt, 1, cID, -1, ManifestSchema.transient)
-                    sqlite3_bind_text(stmt, 2, cDom, -1, ManifestSchema.transient)
-                    sqlite3_bind_text(stmt, 3, cRel, -1, ManifestSchema.transient)
-                    sqlite3_bind_int(stmt, 4, flags)
+                    noteBind(1, sqlite3_bind_text(stmt, 1, cID, -1, ManifestSchema.transient))
+                    noteBind(2, sqlite3_bind_text(stmt, 2, cDom, -1, ManifestSchema.transient))
+                    noteBind(3, sqlite3_bind_text(stmt, 3, cRel, -1, ManifestSchema.transient))
+                    noteBind(4, sqlite3_bind_int(stmt, 4, flags))
                     _ = blob.withUnsafeBytes { ptr in
-                        sqlite3_bind_blob(stmt, 5, ptr.baseAddress, Int32(blob.count),
-                                          ManifestSchema.transient)
+                        noteBind(5, sqlite3_bind_blob(stmt, 5, ptr.baseAddress, Int32(blob.count),
+                                                      ManifestSchema.transient))
                     }
                 }
             }
         }
+        if let bindFailure {
+            ManifestStore.sqlFailure("upsert: bind \(bindFailure.index) for \(domain)/\(relativePath)",
+                                     db, bindFailure.rc)
+        }
         let rc = sqlite3_step(stmt)
         guard rc == SQLITE_DONE else {
+            ManifestStore.sqlFailure("upsert: step INSERT for \(domain)/\(relativePath)", db, rc)
             throw GoldenNuggetError("Manifest.db: INSERT for \(domain)/\(relativePath) failed with code \(rc)")
         }
     }
@@ -170,11 +318,19 @@ struct ManifestStore {
         defer { sqlite3_close(db) }
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }
-        guard sqlite3_prepare_v2(db, "SELECT name FROM sqlite_master WHERE type = 'table'",
-                                 -1, &stmt, nil) == SQLITE_OK else { return [] }
+        let prepareRC = sqlite3_prepare_v2(db, "SELECT name FROM sqlite_master WHERE type = 'table'",
+                                           -1, &stmt, nil)
+        guard prepareRC == SQLITE_OK else {
+            ManifestStore.sqlFailure("tableNames: prepare sqlite_master tables", db, prepareRC)
+            return []
+        }
         var names: [String] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             if let text = sqlite3_column_text(stmt, 0) { names.append(String(cString: text)) }
+        }
+        let tail = sqlite3_errcode(db)
+        if tail != SQLITE_OK {
+            ManifestStore.sqlFailure("tableNames: step sqlite_master tables", db, tail)
         }
         return names.sorted()
     }
@@ -189,15 +345,20 @@ struct ManifestStore {
         defer { sqlite3_close(db) }
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT fileID, domain, relativePath FROM Files "
-                                     + "WHERE relativePath LIKE ? ORDER BY relativePath DESC",
-                                 -1, &stmt, nil) == SQLITE_OK, let stmt else {
+        let prepareRC = sqlite3_prepare_v2(db, "SELECT fileID, domain, relativePath FROM Files "
+                                               + "WHERE relativePath LIKE ? ORDER BY relativePath DESC",
+                                           -1, &stmt, nil)
+        guard prepareRC == SQLITE_OK, let stmt else {
+            ManifestStore.sqlFailure("rows: prepare SELECT for LIKE \(pattern)", db, prepareRC)
             throw GoldenNuggetError("Manifest.db has no readable Files table "
                 + "(tables present: \(tableNames.isEmpty ? "none" : tableNames.joined(separator: ", "))). "
                 + "That is the host-written placeholder, not the database the device uploads.")
         }
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_text(stmt, 1, pattern, -1, ManifestSchema.transient)
+        let bindRC = sqlite3_bind_text(stmt, 1, pattern, -1, ManifestSchema.transient)
+        if bindRC != SQLITE_OK {
+            ManifestStore.sqlFailure("rows: bind LIKE pattern \(pattern)", db, bindRC)
+        }
 
         var rows: [Row] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -210,6 +371,10 @@ struct ManifestStore {
                             domain: String(cString: domainText),
                             relativePath: String(cString: pathText),
                             payload: FileManager.default.fileExists(atPath: url.path) ? url : nil))
+        }
+        let tail = sqlite3_errcode(db)
+        if tail != SQLITE_OK {
+            ManifestStore.sqlFailure("rows: step SELECT for LIKE \(pattern)", db, tail)
         }
         return rows
     }
@@ -301,6 +466,7 @@ struct ManifestStore {
             AppLog.write("Prune Manifest.db: no Manifest.db at \(dbPath) — skipped")
             return nil
         }
+        dumpPreModificationDiagnostics()
         guard let db = try? open() else {
             AppLog.write("Prune Manifest.db: could not open \(dbPath) — skipped")
             return nil
@@ -318,14 +484,19 @@ struct ManifestStore {
         var payloadLessSample: [String] = []
         var keptFlags: [Int32: Int] = [:]
 
-        guard sqlite3_exec(db, "BEGIN", nil, nil, nil) == SQLITE_OK else {
+        let beginRC = sqlite3_exec(db, "BEGIN", nil, nil, nil)
+        guard beginRC == SQLITE_OK else {
+            ManifestStore.sqlFailure("prune: exec BEGIN", db, beginRC)
             AppLog.write("Prune Manifest.db: could not begin a transaction — skipped")
             return nil
         }
         var committed = false
         defer {
             if !committed {
-                sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                let rollbackRC = sqlite3_exec(db, "ROLLBACK", nil, nil, nil)
+                if rollbackRC != SQLITE_OK {
+                    ManifestStore.sqlFailure("prune: exec ROLLBACK", db, rollbackRC)
+                }
                 AppLog.write("Prune Manifest.db: rolled back — the manifest is untouched")
             }
         }
@@ -338,8 +509,9 @@ struct ManifestStore {
         // keep-set excludes as long as something was uploaded for it, and it
         // drops a symlink row, whose payload never exists.  The reference
         // resolves both by predicate, so this does too.
-        if sqlite3_prepare_v2(db, "SELECT fileID, domain, relativePath, flags FROM Files",
-                              -1, &stmt, nil) == SQLITE_OK, let stmt {
+        let selectRC = sqlite3_prepare_v2(db, "SELECT fileID, domain, relativePath, flags FROM Files",
+                                          -1, &stmt, nil)
+        if selectRC == SQLITE_OK, let stmt {
             defer { sqlite3_finalize(stmt) }
             while sqlite3_step(stmt) == SQLITE_ROW {
                 guard let cID = sqlite3_column_text(stmt, 0) else { continue }
@@ -371,6 +543,12 @@ struct ManifestStore {
                 keepIDs.append(fileID)
                 keptFlags[flags, default: 0] += 1
             }
+            let tail = sqlite3_errcode(db)
+            if tail != SQLITE_OK {
+                ManifestStore.sqlFailure("prune: step SELECT Files rows", db, tail)
+            }
+        } else {
+            ManifestStore.sqlFailure("prune: prepare SELECT Files rows", db, selectRC)
         }
 
         if payloadLess > 0 {
@@ -380,38 +558,57 @@ struct ManifestStore {
         }
 
         // Phase 2: rewrite the table against the keep set.
-        guard sqlite3_exec(db,
-                           "CREATE TEMP TABLE IF NOT EXISTS _keep (fileID TEXT)",
-                           nil, nil, nil) == SQLITE_OK else {
+        let createRC = sqlite3_exec(db,
+                                    "CREATE TEMP TABLE IF NOT EXISTS _keep (fileID TEXT)",
+                                    nil, nil, nil)
+        guard createRC == SQLITE_OK else {
+            ManifestStore.sqlFailure("prune: exec CREATE TEMP TABLE _keep", db, createRC)
             AppLog.write("Prune Manifest.db: could not create the keep table — skipped")
             return nil
         }
 
         var insert: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "INSERT INTO _keep (fileID) VALUES (?)", -1, &insert, nil) == SQLITE_OK,
-              let insert else {
+        let keepPrepareRC = sqlite3_prepare_v2(db, "INSERT INTO _keep (fileID) VALUES (?)",
+                                               -1, &insert, nil)
+        guard keepPrepareRC == SQLITE_OK, let insert else {
+            ManifestStore.sqlFailure("prune: prepare INSERT INTO _keep", db, keepPrepareRC)
             AppLog.write("Prune Manifest.db: could not prepare the keep insert — skipped")
             return nil
         }
         // Prepared ONCE, outside the loop: the original re-prepared the statement
         // for every kept row, which is a full compile of the INSERT per file on a
         // filtered whole-device backup (tens of thousands of rows).
+        // Only the FIRST failing keep-insert is logged: on a database
+        // that rejects writes at all, every row would fail the same way
+        // and tens of thousands of identical lines would bury the cause.
+        var keepFailureLogged = false
         for fid in keepIDs {
             sqlite3_reset(insert)
             sqlite3_clear_bindings(insert)
             _ = fid.withCString { sqlite3_bind_text(insert, 1, $0, -1, ManifestSchema.transient) }
-            sqlite3_step(insert)
+            let stepRC = sqlite3_step(insert)
+            if stepRC != SQLITE_DONE, !keepFailureLogged {
+                keepFailureLogged = true
+                ManifestStore.sqlFailure("prune: step INSERT INTO _keep for \(fid)", db, stepRC)
+            }
         }
         sqlite3_finalize(insert)
 
-        guard sqlite3_exec(db, "DELETE FROM Files WHERE fileID NOT IN (SELECT fileID FROM _keep)",
-                           nil, nil, nil) == SQLITE_OK else {
+        let deleteRC = sqlite3_exec(db, "DELETE FROM Files WHERE fileID NOT IN (SELECT fileID FROM _keep)",
+                                    nil, nil, nil)
+        guard deleteRC == SQLITE_OK else {
+            ManifestStore.sqlFailure("prune: exec DELETE FROM Files (the row rewrite)", db, deleteRC)
             AppLog.write("Prune Manifest.db: the row rewrite failed — skipped")
             return nil
         }
-        sqlite3_exec(db, "DROP TABLE _keep", nil, nil, nil)
+        let dropRC = sqlite3_exec(db, "DROP TABLE _keep", nil, nil, nil)
+        if dropRC != SQLITE_OK {
+            ManifestStore.sqlFailure("prune: exec DROP TABLE _keep", db, dropRC)
+        }
 
-        guard sqlite3_exec(db, "COMMIT", nil, nil, nil) == SQLITE_OK else {
+        let commitRC = sqlite3_exec(db, "COMMIT", nil, nil, nil)
+        guard commitRC == SQLITE_OK else {
+            ManifestStore.sqlFailure("prune: exec COMMIT", db, commitRC)
             AppLog.write("Prune Manifest.db: commit failed — skipped")
             return nil
         }
@@ -461,9 +658,11 @@ struct ManifestStore {
         var stmt: OpaquePointer?
         // `file IS NULL OR length(file) = 0` is the third thing the device can
         // read a "type" out of: a row whose blob is empty has no `Mode` at all.
-        guard sqlite3_prepare_v2(
+        let prepareRC = sqlite3_prepare_v2(
             db, "SELECT fileID, flags, (file IS NULL OR length(file) = 0), file FROM Files",
-            -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            -1, &stmt, nil)
+        guard prepareRC == SQLITE_OK, let stmt else {
+            ManifestStore.sqlFailure("audit: prepare SELECT Files rows", db, prepareRC)
             return "pre-restore audit: could not read Manifest.db"
         }
         defer { sqlite3_finalize(stmt) }
@@ -511,6 +710,10 @@ struct ManifestStore {
                 if firstMissing == nil { firstMissing = fileID }
             }
         }
+        let tail = sqlite3_errcode(db)
+        if tail != SQLITE_OK {
+            ManifestStore.sqlFailure("audit: step SELECT Files rows", db, tail)
+        }
 
         // Both halves are reported: a row with a payload but no blob is just as
         // unusable to the device as the reverse, and until now only the payload
@@ -552,8 +755,10 @@ struct ManifestStore {
         defer { sqlite3_close(db) }
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT fileID, file FROM Files WHERE file IS NOT NULL",
-                                 -1, &stmt, nil) == SQLITE_OK, let stmt else {
+        let prepareRC = sqlite3_prepare_v2(db, "SELECT fileID, file FROM Files WHERE file IS NOT NULL",
+                                           -1, &stmt, nil)
+        guard prepareRC == SQLITE_OK, let stmt else {
+            ManifestStore.sqlFailure("blobKeySample: prepare SELECT fileID, file", db, prepareRC)
             return "blob keys: could not read Manifest.db"
         }
         defer { sqlite3_finalize(stmt) }
@@ -579,6 +784,10 @@ struct ManifestStore {
             }
             if oursKeys != nil, deviceKeys != nil { break }
         }
+        let tail = sqlite3_errcode(db)
+        if tail != SQLITE_OK {
+            ManifestStore.sqlFailure("blobKeySample: step SELECT fileID, file", db, tail)
+        }
         return "blob keys: ours=[\(oursKeys ?? "row not found")] "
             + "device=[\(deviceKeys ?? "no other row to compare against")]"
             + " | shape ours: \(oursShape ?? "-")"
@@ -597,8 +806,12 @@ struct ManifestStore {
         guard exists, let db = try? open() else { return 0 }
         defer { sqlite3_close(db) }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT file FROM Files WHERE file IS NOT NULL",
-                                 -1, &stmt, nil) == SQLITE_OK, let stmt else { return 0 }
+        let prepareRC = sqlite3_prepare_v2(db, "SELECT file FROM Files WHERE file IS NOT NULL",
+                                           -1, &stmt, nil)
+        guard prepareRC == SQLITE_OK, let stmt else {
+            ManifestStore.sqlFailure("maxInode: prepare SELECT file", db, prepareRC)
+            return 0
+        }
         defer { sqlite3_finalize(stmt) }
         var highest = 0
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -607,6 +820,10 @@ struct ManifestStore {
             if let inode = mbFileBlobInode(Data(bytes: raw, count: Int(count))) {
                 highest = max(highest, inode)
             }
+        }
+        let tail = sqlite3_errcode(db)
+        if tail != SQLITE_OK {
+            ManifestStore.sqlFailure("maxInode: step SELECT file", db, tail)
         }
         return highest
     }

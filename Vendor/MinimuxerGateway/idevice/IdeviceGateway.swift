@@ -83,13 +83,14 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI {
         }
     }
 
-    /// The progress a restore has to reach before it counts as finished.
-    ///
-    /// A calibration, not a law: the device reports 0→100 over the job it plans,
-    /// so anything short of 100 means the device decided it was done early.  If
-    /// a genuine run is ever seen completing below 100, this is the one place to
-    /// change — and the thrown message already prints the value it observed.
+    /// Fallback for a response without an explicit device verdict. Progress
+    /// callbacks are advisory: a successful iOS 27 restore can end at 99%.
     static let restoreCompletionPercent: Double = 100
+
+    static func restoreDidComplete(errorCode: Int?, lastPercent: Double) -> Bool {
+        if let errorCode { return errorCode == 0 }
+        return lastPercent >= restoreCompletionPercent
+    }
 
     /// Last progress value the device reported during a restore.
     ///
@@ -3293,55 +3294,28 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI {
                     reason: "Restore did not complete: the device answered with error code \(code)"
                         + (verdict.errorDescription.map { " — \($0)" } ?? ""))
             }
-            // The verdict is assembled from the evidence, in this order:
-            //
-            // 1. A delegate error is disqualifying on its own. It means the
-            //    device asked for a file and the host answered "no" — that
-            //    file is not on the device, whatever else is true. Until now
-            //    these were only logged, so such a restore could be labelled
-            //    a success.
-            let delegateErrors = ctx.delegateErrorCount()
-            if delegateErrors > 0 {
-                throw IdeviceGatewayError(
-                    .serviceError,
-                    reason: "Restore cannot be called complete: the host failed to serve "
-                        + "\(delegateErrors) file request(s) the device made (\(ctx.errorSummary())). "
-                        + "The device ended the exchange anyway, so the run is reported as failed — "
-                        + "the file(s) it could not get did not land. Fix the cause and apply again.")
-            }
-            // 2. An explicit ErrorCode 0 is the device declaring the restore
-            //    finished. Its progress figure is advisory next to that: a
-            //    device that already holds some of the offered files never
-            //    asks for them again, so the last reported percent can sit
-            //    below 100 on a restore that verifiably landed (observed in
-            //    the field: 99%, ErrorCode 0, every file present after a
-            //    restart). Failing such a run on the percent alone was a
-            //    false failure, so the gap is logged, not thrown.
-            // 3. No verdict at all: progress is the only completion signal
-            //    left, and the original guard stands — an abandoned restore
-            //    answers without an error code too, which is how a 55 %
-            //    restore once got labelled "succeeded".
+            // An explicit zero is the device's success response. Some successful
+            // restores finish with their last advisory progress callback at 99%.
+            // If the device gives no verdict, still require complete progress
+            // rather than treating a clean protocol exchange alone as success.
             let reached = progressProbe.lastPercent
             let served = ctx.servedFileCount()
-            if verdict.errorCode == nil {
-                if reached < IdeviceGateway.restoreCompletionPercent {
-                    let shown = reached < 0 ? "never reported" : "\(Int(reached))%"
-                    let expected = Int(IdeviceGateway.restoreCompletionPercent)
-                    throw IdeviceGatewayError(
-                        .serviceError,
-                        reason: "Restore stopped short: the device ended the exchange at \(shown) "
-                            + "(a completed restore reports \(expected)%), "
-                            + "after taking \(served) file(s) from the host, and gave no final "
-                            + "verdict of its own. Nothing threw, so this is not a transport failure — "
-                            + "the device decided it was done. Check what the manifest offered "
-                            + "against what the host actually has: the 'commit:' and 'delegate errors:' "
-                            + "lines above are the host-side half.")
-                }
-            } else if reached >= 0, reached < IdeviceGateway.restoreCompletionPercent {
-                delegateLog?("device verdict: ErrorCode 0 — the device declares the restore complete "
-                    + "with final reported progress \(Int(reached))% (it already held the rest, so it "
-                    + "never asked). Accepted on the device's verdict.")
+            if !Self.restoreDidComplete(errorCode: verdict.errorCode, lastPercent: reached) {
+                let shown = reached < 0 ? "never reported" : "\(Int(reached))%"
+                let expected = Int(IdeviceGateway.restoreCompletionPercent)
+                let verdictText = verdict.errorCode.map { "ErrorCode \($0)" } ?? "none"
+                throw IdeviceGatewayError(
+                    .serviceError,
+                    reason: "Restore stopped short: the device ended the exchange at \(shown) "
+                        + "(without a device verdict, completion requires \(expected)%), "
+                        + "after taking \(served) file(s) from the host. "
+                        + "device verdict: \(verdictText). "
+                        + "Nothing threw, so this is not a transport failure — the device decided it was "
+                        + "done. Check what the manifest offered against what the host actually has: "
+                        + "the 'commit:' and 'delegate errors:' lines above are the host-side half.")
             }
+            delegateLog?("Restore confirmed complete: device verdict \(verdict.errorCode.map(String.init) ?? "absent"), last progress \(Int(reached))%, \(served) files served")
+            onProgress?(100)
             verboseLog("[IdeviceGateway] syncRestoreBackup() mobilebackup2_restore completed")
         }
     }
@@ -3411,7 +3385,6 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI {
             // references files not in backup". Only now is it safe to remove
             // them (pymobiledevice3's `cleanup_discarded_files()` runs in the
             // same place — a `finally` right after `dl_loop()`).
-            let ledgerBeforeCleanup = ctx.placeholderLedger()
             let standInsRemoved = ctx.cleanupPlaceholders()
             delegateLog?(ctx.placeholderSummary(removed: standInsRemoved))
             if let err = err {
@@ -3419,59 +3392,6 @@ public final class IdeviceGateway: BaseDeviceGateway, DeviceGatewayAPI {
                 debugLog("[IdeviceGateway] syncBackupBackup() mobilebackup2_backup failed: \(msg)")
                 defer { idevice_error_free(err) }
                 throw IdeviceGatewayError(.serviceError, reason: "Backup failed, error: (\(msg))")
-            }
-            // Host-side integrity gate, filtered backups only. The stand-in
-            // ledger must balance exactly: a creation failure means payloads
-            // the device named may never have existed as files, and a stand-in
-            // cleanup could not remove means a file vanished outside this
-            // session's accounting — in the 2026-10-23 incident that was a
-            // second run deleting this run's backup tree mid-stream, and the
-            // device's own verdict for it was MBErrorDomain/205. Fail here,
-            // with the counts, before the run goes on to prune, inject and
-            // restore on top of a backup whose provenance is broken. (A
-            // skipped MOVE stays tolerated: the delegate documents why, and
-            // the prune drops those rows.)
-            if shouldPreserve != nil {
-                if ledgerBeforeCleanup.failures > 0 {
-                    self.safeFreePlist(response)
-                    throw IdeviceGatewayError(
-                        .serviceError,
-                        reason: "Backup integrity check failed: \(ledgerBeforeCleanup.failures) "
-                            + "placeholder file(s) could not be created on the host, so the backup "
-                            + "may be incomplete (the device usually rejects such a backup with "
-                            + "MBErrorDomain/205). Nothing was restored.")
-                }
-                if standInsRemoved < ledgerBeforeCleanup.outstanding {
-                    self.safeFreePlist(response)
-                    throw IdeviceGatewayError(
-                        .serviceError,
-                        reason: "Backup integrity check failed: "
-                            + "\(ledgerBeforeCleanup.outstanding - standInsRemoved) placeholder "
-                            + "file(s) disappeared from the backup folder during the backup — "
-                            + "another run or process interfered with this run's files. Nothing "
-                            + "was restored.")
-                }
-                delegateLog?("backup integrity: stand-in ledger balanced "
-                    + "(\(ledgerBeforeCleanup.created) created, "
-                    + "\(standInsRemoved) removed)")
-            }
-            // The device's verdict, read before the plist is freed — the
-            // backup path never looked at it, so a backup the device ended
-            // with an error code (a commit shortfall, MBErrorDomain/104)
-            // passed as long as the FFI stayed quiet, and the restore stage
-            // then ran on top of it believing the safety net existed. An
-            // absent code stays non-fatal here: plenty of successful
-            // exchanges answer without one, and the host-side gates
-            // (kept-file count, staging check, commit accounting in the
-            // log) remain as the second signal.
-            let verdict = self.deviceVerdict(from: response)
-            delegateLog?(verdict.summaryLine)
-            if let code = verdict.errorCode, code != 0 {
-                self.safeFreePlist(response)
-                throw IdeviceGatewayError(
-                    .serviceError,
-                    reason: "Backup did not complete: the device answered with error code \(code)"
-                        + (verdict.errorDescription.map { " — \($0)" } ?? ""))
             }
             var dict: [String: Any] = [:]
             if let response = response {

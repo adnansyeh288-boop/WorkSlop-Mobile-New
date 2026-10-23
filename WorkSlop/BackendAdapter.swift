@@ -133,7 +133,6 @@ enum GNMapping {
         "sb-disable-fly-in": ["SBDisableIconFlyInAnimation"],
         // Daemons (spec id is "Daemon.<group name>")
         "dm-clear-screentime": ["ClearScreenTimeAgentPlist"],
-        "dm-thermalmonitord": ["Daemon.thermalmonitord"],
         "dm-ota": ["Daemon.OTA"],
         "dm-usagetrackingagent": ["Daemon.UsageTrackingAgent"],
         "dm-gamecenter": ["Daemon.GameCenter"],
@@ -169,7 +168,6 @@ enum GNMapping {
         "in-build-version": ["SBBuildNumber"],
         "in-rtl": ["RTL"],
         "in-ltr": ["LTR"],
-        "in-disable-thermal": ["Daemon.thermalmonitord"],
         "in-hidden-icons": ["SBIconVisibility"],
     ]
 

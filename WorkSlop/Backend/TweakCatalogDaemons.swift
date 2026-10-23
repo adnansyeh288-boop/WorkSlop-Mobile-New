@@ -40,14 +40,6 @@ enum DaemonSection: String, CaseIterable, Identifiable, Sendable {
 enum DaemonGroups {
     static let all: [DaemonGroup] = [
         DaemonGroup(
-            name: "thermalmonitord",
-            title: "Disable thermalmonitord",
-            labels: ["com.apple.thermalmonitord"],
-            section: .disable,
-            isRecommended: false,
-            showsSwitch: true
-        ),
-        DaemonGroup(
             name: "OTA",
             title: "Disable OTA",
             labels: ["com.apple.mobile.softwareupdated", "com.apple.OTATaskingAgent", "com.apple.softwareupdateservicesd", "com.apple.mobile.NRDUpdated"],
@@ -455,7 +447,6 @@ enum DaemonGroups {
         "com.apple.syslogd",
         "com.apple.system.logger",
         "com.apple.tailspind",
-        "com.apple.thermalmonitord",
         "com.apple.tipsd",
         "com.apple.triald",
         "com.apple.voiced",
