@@ -1,13 +1,15 @@
+<p align="center">
+  <img src="assets/workslop-icon.png" width="160" alt="WorkSlop Mobile icon">
+</p>
+
 # WorkSlop — Mobile (New)
 
-WorkSlop Mobile by **adnan.120hz**. The tweak engine / apply method in this
-app is a fork of **GoldenNugget by
-[awesomenull-dev](https://github.com/awesomenull-dev/GoldenNugget)**
-(GoldenNugget-Team /
-[GoldenNugget-mobile](https://github.com/GoldenNugget-Team/GoldenNugget-mobile)),
-imported from the fork `adnan120hz/GoldenNugget-mobile`. The user interface
-is WorkSlop's own; the GoldenNugget UI is not used. Licensed under
-**AGPL-3.0** (see `LICENSE`), following the upstream license.
+WorkSlop Mobile by **adnan.120hz** — a no-jailbreak iOS customization app.
+Sideload the IPA, import your pairing file once, and apply everything
+straight from your iPhone. The tweak engine / apply method is based on an
+open-source upstream engine (see Credits below); the user interface is
+WorkSlop's own two-slider interface. Licensed under **AGPL-3.0** (see
+`LICENSE`), following the upstream license.
 
 ## v3.0
 
@@ -48,6 +50,13 @@ Not working on iOS 27+ yet:
 - The other Liquid Glass features
 
 On iOS 26 everything listed under Features is active.
+
+### Credits
+
+- App and interface: **adnan.120hz**
+- Beta tester team: Charlie, rfrz1d_, Davy, uggtx, Fayaz, alfndv1, s1gn
+- Engine and upstream contributors: see the full Credits at the bottom of
+  this file.
 
 ## Status (honest)
 
