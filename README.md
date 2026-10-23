@@ -154,7 +154,11 @@ ride the engine's unchanged delivery (see Changes from upstream).
 
 ## Credits
 
-- **adnan.120hz** — WorkSlop Mobile lead developer (app, UI, integration).
+- **adnan.120hz** — WorkSlop Mobile lead developer. Builds the app and
+  its interface, builds new code, builds new tweaks, and builds the iOS
+  system adaptations that make them work on each iOS version.
+- Beta tester team (WorkSlop Mobile): Charlie, rfrz1d_, Davy, uggtx,
+  Fayaz, alfndv1, s1gn.
 
 Upstream engine credits — the open-source engine this app builds on:
 
@@ -163,7 +167,7 @@ Upstream engine credits — the open-source engine this app builds on:
 - [@mak5er](https://github.com/mak5er): AirCard developer.
 - [NeoSpring](https://github.com/rooootdev/neospring): Swift implementation by **[@skadz108](https://github.com/skadz108)** and **[@rooootdev](https://github.com/rooootdev)**, and **[@neonmodder123](https://github.com/neonmodder123)** for the WebKit GPU process respring technique.
 - [LeminLimez] for creating Nugget.
-- [0xjonhnnydev] for [AirLift]
+- 0xjonhnnydev for AirLift
 - [iTechExpert][iTechExpertTwitter] for various Springboard/Internal Options
 - [Mikasa-san][Mikasa-sanGitHub] for [Quiet Daemon][QuietDaemonGitHub]
 
