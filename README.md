@@ -56,8 +56,7 @@ On iOS 26 everything listed under Features is active.
 
 - App and interface: **adnan.120hz**
 - Beta tester team: Charlie, rfrz1d_, Davy, uggtx, Fayaz, alfndv1, s1gn
-- Engine and upstream contributors: see the full Credits at the bottom of
-  this file.
+- Engine and upstream contributors: see "Changes from upstream" below.
 
 ## Status (honest)
 
@@ -111,6 +110,16 @@ ride the engine's unchanged delivery (see Changes from upstream).
   the backend (`Nugget/Core`, tunnel stack, vendored Minimuxer /
   IDevice / AirliftFFI frameworks) is imported, unmodified except for
   project integration.
+- Upstream engine and contributors: engine by [awesomenull] and
+  [Wind0ws11Aero], building on [LeminLimez] (Nugget),
+  [@mak5er](https://github.com/mak5er) (AirCard),
+  [NeoSpring](https://github.com/rooootdev/neospring) by
+  [@skadz108](https://github.com/skadz108),
+  [@rooootdev](https://github.com/rooootdev) and
+  [@neonmodder123](https://github.com/neonmodder123), 0xjonhnnydev
+  (AirLift), [iTechExpert][iTechExpertTwitter] (SpringBoard/Internal
+  options) and [Mikasa-san][Mikasa-sanGitHub]
+  ([Quiet Daemon][QuietDaemonGitHub]).
 - App identity: bundle `com.adnan120hz.workslop`, name "WorkSlop".
 - Feature catalogue presented in WorkSlop's grouping; daemon groups are
   driven from the upstream `DaemonGroups.all` data.
@@ -165,17 +174,6 @@ ride the engine's unchanged delivery (see Changes from upstream).
   system adaptations that make them work on each iOS version.
 - Beta tester team (WorkSlop Mobile): Charlie, rfrz1d_, Davy, uggtx,
   Fayaz, alfndv1, s1gn.
-
-Upstream engine credits — the open-source engine this app builds on:
-
-- [awesomenull] — engine developer
-- [Wind0ws11Aero] for helping with development a lot.
-- [@mak5er](https://github.com/mak5er): AirCard developer.
-- [NeoSpring](https://github.com/rooootdev/neospring): Swift implementation by **[@skadz108](https://github.com/skadz108)** and **[@rooootdev](https://github.com/rooootdev)**, and **[@neonmodder123](https://github.com/neonmodder123)** for the WebKit GPU process respring technique.
-- [LeminLimez] for creating Nugget.
-- 0xjonhnnydev for AirLift
-- [iTechExpert][iTechExpertTwitter] for various Springboard/Internal Options
-- [Mikasa-san][Mikasa-sanGitHub] for [Quiet Daemon][QuietDaemonGitHub]
 
 [awesomenull]: https://github.com/awesomenull-dev
 [Wind0ws11Aero]: https://github.com/Wind0ws11Aero
