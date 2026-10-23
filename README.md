@@ -60,12 +60,6 @@ On iOS 26 everything listed under Features is active.
 
 ## Status (honest)
 
-- **2026-10-22 — backend replaced.** The previous home-grown Swift/FFI
-  tweak engine did not work reliably, so it was removed entirely and
-  replaced with the upstream engine backend (`GoldenNuggetEngine`,
-  TweakCatalog specs, Minimuxer/EMProxy tunnel, AirliftFFI PosterBoard).
-  The WorkSlop UI was kept and rewired to that engine
-  (`BackendAdapter.swift`, `BackendBootstrap.swift`).
 - **Supported devices: iOS 26.0 through iOS 27.0.1 and newer** (the
   engine requires the iOS 26 SDK surface). The app says so on
   unsupported versions.
