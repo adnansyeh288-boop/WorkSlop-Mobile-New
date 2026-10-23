@@ -15,8 +15,9 @@ WorkSlop's own two-slider interface. Licensed under **AGPL-3.0** (see
 
 ### Before you apply — read this first
 
-**Find My iPhone must be turned OFF before applying tweaks.** Applying
-with Find My still on can make the apply fail. Turn it off in
+## ⚠️ Find My iPhone must be turned OFF before applying tweaks
+
+Applying with Find My still on can make the apply fail. Turn it off in
 Settings → [your name] → Find My → Find My iPhone, apply your tweaks,
 and you can turn it back on afterwards.
 
@@ -153,7 +154,11 @@ ride the engine's unchanged delivery (see Changes from upstream).
 
 ## Credits
 
-- [awesomenull] Lead developer
+- **adnan.120hz** — WorkSlop Mobile lead developer (app, UI, integration).
+
+Upstream engine credits — the open-source engine this app builds on:
+
+- [awesomenull] — engine developer
 - [Wind0ws11Aero] for helping with development a lot.
 - [@mak5er](https://github.com/mak5er): AirCard developer.
 - [NeoSpring](https://github.com/rooootdev/neospring): Swift implementation by **[@skadz108](https://github.com/skadz108)** and **[@rooootdev](https://github.com/rooootdev)**, and **[@neonmodder123](https://github.com/neonmodder123)** for the WebKit GPU process respring technique.
@@ -161,7 +166,6 @@ ride the engine's unchanged delivery (see Changes from upstream).
 - [0xjonhnnydev] for [AirLift]
 - [iTechExpert][iTechExpertTwitter] for various Springboard/Internal Options
 - [Mikasa-san][Mikasa-sanGitHub] for [Quiet Daemon][QuietDaemonGitHub]
-- WorkSlop UI and integration: adnan.120hz
 
 [awesomenull]: https://github.com/awesomenull-dev
 [Wind0ws11Aero]: https://github.com/Wind0ws11Aero
