@@ -9,6 +9,46 @@ imported from the fork `adnan120hz/GoldenNugget-mobile`. The user interface
 is WorkSlop's own; the GoldenNugget UI is not used. Licensed under
 **AGPL-3.0** (see `LICENSE`), following the upstream license.
 
+## v3.0
+
+### Before you apply — read this first
+
+**Find My iPhone must be turned OFF before applying tweaks.** Applying
+with Find My still on can make the apply fail. Turn it off in
+Settings → [your name] → Find My → Find My iPhone, apply your tweaks,
+and you can turn it back on afterwards.
+
+### Support
+
+- **iOS 26 — Supported.** All features are active.
+- **iOS 27 and later — Partially Supported.** The apply method works,
+  but only part of the feature catalogue takes effect (see below).
+
+### Features
+
+- Liquid Glass tweaks
+- Icon Themes
+- Status Bar customisation
+- Apple Internal options
+- Daemons control
+- PosterBoard wallpapers
+- Remove Tweaks — undo applied tweaks and return the files to their
+  defaults
+
+### iOS 27+ — what works and what does not
+
+Working on iOS 27+:
+
+- Disable Liquid Glass on Dock
+- Disable Liquid Glass Reflections
+
+Not working on iOS 27+ yet:
+
+- Status Bar
+- The other Liquid Glass features
+
+On iOS 26 everything listed under Features is active.
+
 ## Status (honest)
 
 - **2026-10-22 — backend replaced.** The previous home-grown Swift/FFI
