@@ -101,7 +101,7 @@ ride the engine's unchanged delivery (see Changes from upstream).
 
 - The interface is WorkSlop's own original UI (SwiftUI), designed and
   built for this app — no upstream interface is used or replaced; only
-  the GoldenNugget backend (`Nugget/Core`, tunnel stack, vendored
+  the Nugget/GoldenNugget backend (`Nugget/Core`, tunnel stack, vendored
   Minimuxer / IDevice / AirliftFFI frameworks) is imported, unmodified
   except for project integration.
 - Upstream engine and contributors: engine by [awesomenull] and
