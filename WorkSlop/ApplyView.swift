@@ -33,15 +33,92 @@ struct ApplyView: View {
     @State private var showRestartSheet = false
     @State private var applyTask: Task<Void, Never>?
 
+    /// The v4 Apply method, persisted across launches. Defaults to
+    /// `.normal` (the proven path); the raw value is stored so a
+    /// value this build does not know falls back to `.normal`
+    /// through the computed `method` below instead of trapping.
+    @AppStorage("ApplyMethod.selected") private var methodRaw: String = ApplyMethod.normal.rawValue
+    @State private var showFPRTutorial = false
+    /// True only when the tutorial sheet was opened by the run
+    /// button: confirming it then starts the run. Opened from
+    /// "How it works" it is read-only information — confirming
+    /// just dismisses it.
+    @State private var tutorialStartsRun = false
+    /// The iOS version read from the device through lockdown (the
+    /// same `DeviceIdentity.read()` a run uses). Empty means the
+    /// device has not answered yet — "not read yet", never a guess.
+    @State private var detectedVersion = ""
+    /// Free-space preflight snapshot (methods `.normal` and
+    /// `.getBackupFile`), refreshed on appear and on method change.
+    @State private var freeSpaceBytes: Int64 = 0
+    @State private var mediaStoreBytes: Int64 = 0
+    @State private var lastFailureSummary: String?
+    @State private var mediaClearError: String?
+    /// Backup packages on this phone (newest first), for the
+    /// FPR + Import picker.
+    @State private var backupPackages: [URL] = []
+    @State private var selectedPackage: URL?
+
     private enum ApplyResult {
         case succeeded
         case failed(String)
         case cancelled
+        case backupExported(name: String, size: Int64)
     }
 
     var body: some View {
         List {
             Section {
+                Picker("Apply method", selection: $methodRaw) {
+                    ForEach(ApplyMethod.allCases) { candidate in
+                        Text(candidate.label)
+                            .tag(candidate.rawValue)
+                            .disabled(candidate.requiresIOS27 && fprDisabledByVersion)
+                    }
+                }
+                .accessibilityIdentifier("apply-method-picker")
+                Text(methodWarning)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                if fprDisabledByVersion {
+                    Text("Force Partial Restore needs iOS 27 — this device reports iOS \(detectedVersion).")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if method.requiresIOS27 {
+                    Button("How it works") {
+                        tutorialStartsRun = false
+                        showFPRTutorial = true
+                    }
+                    .accessibilityIdentifier("fpr-how-it-works")
+                }
+            } header: {
+                Text("Apply method")
+            }
+
+            if method == .forcePartialRestoreImport {
+                Section {
+                    if backupPackages.isEmpty {
+                        Text("No backup package on this phone yet. Run Get Backup File first.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Backup package", selection: $selectedPackage) {
+                            ForEach(backupPackages, id: \.self) { package in
+                                Text("\(package.lastPathComponent) — \(formattedBytes(BackupExportStore.size(of: package)))")
+                                    .tag(Optional(package))
+                            }
+                        }
+                        .accessibilityIdentifier("backup-package-picker")
+                    }
+                } header: {
+                    Text("Backup package")
+                }
+            }
+
+            Section {
+                Text("iOS version detected: \(detectedVersion.isEmpty ? "not read yet" : detectedVersion)")
+                Text(willRunText)
                 preflightRow("Tweaks staged", ok: !selection.staged.isEmpty,
                              detail: "\(ApplyCounter.tweakCount(staged: selection.staged))")
                 if !iconStage.staged.isEmpty {
@@ -64,6 +141,31 @@ struct ApplyView: View {
                              detail: BuildSupport.current.displayText)
                 preflightRow("Pairing file imported", ok: status.pairingImported, detail: nil)
                 preflightRow("VPN tunnel detected", ok: status.vpnDetected, detail: nil)
+                Text("⚠️ Find My iPhone must be OFF before applying. With it on, the device refuses the restore (error 211) after the backup has already run. Turn it off in Settings → your name → Find My → Find My iPhone.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                if method == .normal || method == .getBackupFile {
+                    Text("Free space on this phone: \(formattedBytes(freeSpaceBytes))")
+                    if mediaStoreBytes > 0 {
+                        HStack {
+                            Text("Media copies held by WorkSlop: \(formattedBytes(mediaStoreBytes))")
+                            Spacer()
+                            Button("Clear") { clearMediaCopies() }
+                                .buttonStyle(.borderless)
+                                .accessibilityIdentifier("clear-media-store")
+                        }
+                    }
+                    if let mediaClearError {
+                        Text(mediaClearError)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+                    if let lastFailureSummary {
+                        Text(lastFailureSummary)
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+                }
             } header: {
                 Text("Preflight")
             } footer: {
@@ -139,12 +241,18 @@ struct ApplyView: View {
                         Text("The engine stopped at a checkpoint after your cancel request. If a restore was already in flight it may have finished or stopped part-way — re-run Apply to complete the changes, and restart your iPhone afterwards either way.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                    case .backupExported(let name, let size):
+                        Label("Backup file saved", systemImage: "checkmark.circle")
+                            .foregroundStyle(Color.green)
+                        Text("\(name) (\(formattedBytes(size))) — saved in WorkSlop's storage on this phone, for later use with Force Partial Restore + Import Backup. Nothing on the phone was changed or restored, so there is nothing to restart for.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
 
             Section {
-                Button(running ? "Applying…" : "Apply now") {
+                Button(runButtonTitle) {
                     startApply()
                 }
                 .buttonStyle(.borderedProminent)
@@ -203,13 +311,158 @@ struct ApplyView: View {
                 }
             }
         }
+        .sheet(isPresented: $showFPRTutorial) {
+            FPRTutorialView(
+                method: method,
+                onConfirm: {
+                    showFPRTutorial = false
+                    if tutorialStartsRun {
+                        tutorialStartsRun = false
+                        beginRun()
+                    }
+                },
+                onCancel: {
+                    tutorialStartsRun = false
+                    showFPRTutorial = false
+                })
+        }
+        .onAppear {
+            refreshFreeSpace()
+            refreshBackupPackages()
+        }
+        .task {
+            await refreshDetectedVersion()
+        }
+        .onChange(of: methodRaw) { _ in
+            refreshFreeSpace()
+            refreshBackupPackages()
+        }
+        .onChange(of: status.unlocked) { _ in
+            Task { await refreshDetectedVersion() }
+        }
     }
 
     // MARK: - State
 
+    /// The selected Apply method (persisted as `methodRaw`).
+    /// An unknown stored value falls back to `.normal`.
+    private var method: ApplyMethod {
+        ApplyMethod(rawValue: methodRaw) ?? .normal
+    }
+
+    private var hasStagedContent: Bool {
+        !selection.staged.isEmpty || !iconStage.staged.isEmpty
+            || statusBarSelection.isActive
+    }
+
     private var canStart: Bool {
-        status.unlocked && (!selection.staged.isEmpty || !iconStage.staged.isEmpty
-                            || statusBarSelection.isActive)
+        guard status.unlocked else { return false }
+        // The picker already disables the FPR pair off iOS 27;
+        // this is the same gate at the button, for a method stored
+        // before the version was read (or on another iOS).
+        if method.requiresIOS27, let major = detectedMajor, major != 27 {
+            return false
+        }
+        switch method {
+        case .getBackupFile:
+            // A standalone copy: no tweaks need to be staged.
+            return true
+        case .forcePartialRestoreImport:
+            return hasStagedContent && selectedPackage != nil
+        case .normal, .forcePartialRestore:
+            return hasStagedContent
+        }
+    }
+
+    private var runButtonTitle: String {
+        if running {
+            return method == .getBackupFile ? "Getting backup…" : "Applying…"
+        }
+        return method == .getBackupFile ? "Get Backup File" : "Apply now"
+    }
+
+    /// The selected method's warning, shown under the picker.
+    /// Factual only — what the method does and what it costs.
+    private var methodWarning: String {
+        switch method {
+        case .normal:
+            return "Takes a protective backup on this phone first, then restores it with your tweaks. iOS only allows the backup when free space is larger than the backup's computed size — if it stops over space, free real space (empty Recently Deleted, restart) and try again."
+        case .forcePartialRestore:
+            return "No backup is taken first — WorkSlop builds a small backup containing only your staged tweaks and restores that. Fast, but there is nothing to roll back to. iOS 27 only."
+        case .forcePartialRestoreImport:
+            return "No backup is taken first — WorkSlop builds a small backup containing only your staged tweaks and restores that. Fast, but there is nothing to roll back to. iOS 27 only."
+                + " A backup package you choose (made by Get Backup File) is merged in: data in the domains it carries replaces the data now on the phone in those domains."
+        case .getBackupFile:
+            return "Copies a backup package onto this phone, for later use with Force Partial Restore + Import Backup. It changes nothing on the phone, but it needs free space while it runs and the package stays in WorkSlop's storage until you delete it."
+        }
+    }
+
+    /// Major version of the lockdown-read iOS version, or nil when
+    /// the device has not answered yet ("not read yet").
+    private var detectedMajor: Int? {
+        guard let first = detectedVersion.split(separator: ".").first else { return nil }
+        return Int(String(first))
+    }
+
+    /// True when the version is readable and is not iOS 27: the
+    /// FPR pair is disabled in the picker in that state. When the
+    /// version is not yet readable the options stay enabled — the
+    /// engine refuses precisely if it still cannot read it at run
+    /// time.
+    private var fprDisabledByVersion: Bool {
+        guard let major = detectedMajor else { return false }
+        return major != 27
+    }
+
+    /// The method that will actually run, for the preflight: the
+    /// selected method's label, plus — for `.normal` — the branch
+    /// the version resolves to when it is readable. Display only;
+    /// the engine re-checks before running.
+    private var willRunText: String {
+        var text = "Will run: \(method.label)"
+        if method == .normal, let major = detectedMajor {
+            text += major >= 27 ? " (protective backup)" : " (partial restore)"
+        }
+        return text
+    }
+
+    private func formattedBytes(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    // MARK: - Preflight snapshots
+
+    private func refreshFreeSpace() {
+        freeSpaceBytes = FreeSpaceGuard.containerFreeBytes()
+        mediaStoreBytes = FreeSpaceGuard.mediaStoreBytes()
+        lastFailureSummary = FreeSpaceGuard.lastFailureSummary()
+    }
+
+    private func clearMediaCopies() {
+        do {
+            _ = try FreeSpaceGuard.clearMediaStore()
+            mediaClearError = nil
+        } catch {
+            mediaClearError = "Could not clear media copies: \(error.localizedDescription)"
+        }
+        refreshFreeSpace()
+    }
+
+    private func refreshBackupPackages() {
+        let packages = BackupExportStore.packageURLs()
+        backupPackages = packages
+        if let current = selectedPackage, packages.contains(current) { return }
+        selectedPackage = packages.first
+    }
+
+    /// Re-read the device version through lockdown — the same
+    /// one-shot read a run makes (`DeviceIdentity.read()` in
+    /// `beginApplyRun`). An empty answer leaves the previous value
+    /// (or "not read yet") in place instead of inventing one.
+    private func refreshDetectedVersion() async {
+        let identity = await DeviceIdentity.read()
+        guard !identity.version.isEmpty else { return }
+        await MainActor.run { detectedVersion = identity.version }
     }
 
     /// The stored status-bar selection the Status Bar page saved, in
@@ -243,12 +496,83 @@ struct ApplyView: View {
 
     // MARK: - Run
 
+    /// The run button's entry point. The FPR pair goes through
+    /// its tutorial sheet first — the run only starts when the
+    /// sheet is confirmed (`tutorialStartsRun`). Every other
+    /// method runs straight away.
     private func startApply() {
+        guard canStart, !running else { return }
+        if method.requiresIOS27 {
+            tutorialStartsRun = true
+            showFPRTutorial = true
+            return
+        }
+        beginRun()
+    }
+
+    /// Dispatch to the selected method's run. Get Backup File is
+    /// a standalone copy, not an apply: it shares the running /
+    /// log / progress machinery but stages nothing, records no
+    /// applied tweaks and never shows the restart sheet.
+    private func beginRun() {
+        guard canStart, !running else { return }
+        if method == .getBackupFile {
+            beginBackupExportRun()
+        } else {
+            beginApplyRun()
+        }
+    }
+
+    private func beginBackupExportRun() {
+        // Make sure the connection bootstrap has had its chance: it
+        // is a no-op when the core is already up.
+        BackendBootstrap.start()
+        running = true
+        cancelling = false
+        result = nil
+        progressPercent = nil
+        etaText = ""
+        lastLoggedPercent = -1
+        logLines = ["[WorkSlop] Get Backup File started — iOS \(DeviceInfoEx.fullVersion) (\(DeviceInfoEx.buildNumber))",
+                    "[WorkSlop] Method: \(ApplyMethod.getBackupFile.label)"]
+        installEngineCallbacks()
+
+        let engine = GoldenNuggetEngine.shared
+        applyTask = Task {
+            // Same version source as an apply run: lockdown first,
+            // this phone's system version as the fallback.
+            let identity = await DeviceIdentity.read()
+            let version = identity.version.isEmpty ? DeviceInfoEx.fullVersion : identity.version
+            do {
+                let package = try await engine.getBackupFile(deviceVersion: version)
+                let size = BackupExportStore.size(of: package)
+                await MainActor.run {
+                    finishRun()
+                    refreshFreeSpace()
+                    refreshBackupPackages()
+                    logLines.append("[100%] Done — backup package saved: \(package.lastPathComponent)")
+                    result = .backupExported(name: package.lastPathComponent, size: size)
+                }
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                await MainActor.run {
+                    let wasCancelling = cancelling
+                    finishRun()
+                    refreshFreeSpace()
+                    result = wasCancelling ? .cancelled : .failed(message)
+                }
+            }
+        }
+    }
+
+    private func beginApplyRun() {
         guard canStart, !running else { return }
         // Make sure the connection bootstrap has had its chance: it
         // is a no-op when the core is already up.
         BackendBootstrap.start()
 
+        let runMethod = method
+        let runPackage = selectedPackage
         let input = GNSelectionBuilder.build(staged: selection.staged)
         let iconBuild = WebClipPayloads.build(staged: iconStage.staged)
         running = true
@@ -258,6 +582,9 @@ struct ApplyView: View {
         etaText = ""
         lastLoggedPercent = -1
         logLines = ["[WorkSlop] Apply started — iOS \(DeviceInfoEx.fullVersion) (\(DeviceInfoEx.buildNumber))"]
+        if runMethod != .normal {
+            logLines.append("[WorkSlop] Method: \(runMethod.label)")
+        }
         for name in input.tendieFailures {
             logLines.append("[WorkSlop] Skipped unreadable .tendies file: \(name)")
         }
@@ -276,7 +603,89 @@ struct ApplyView: View {
             result = .failed("Nothing deliverable is staged — none of the staged tweaks exist in the current engine and no icon theme could be built. Unstage them and pick from the current list.")
             return
         }
+        if runMethod == .forcePartialRestoreImport, runPackage == nil {
+            running = false
+            result = .failed("No backup package selected — run Get Backup File first, then pick the package above.")
+            return
+        }
 
+        let engine = GoldenNuggetEngine.shared
+        installEngineCallbacks()
+
+        applyTask = Task {
+            // The engine wants the device's own version line: read it
+            // from lockdownd when the connection is up, and fall back
+            // to this phone's system version (the device IS this
+            // phone) when it is not.
+            let identity = await DeviceIdentity.read()
+            let version = identity.version.isEmpty ? DeviceInfoEx.fullVersion : identity.version
+            let isIPhone = identity.productType.isEmpty
+                ? DeviceStatus.model.hasPrefix("iPhone")
+                : identity.isIPhone
+            do {
+                switch runMethod {
+                case .normal:
+                    try await engine.applyTweaks(selection: input.selection,
+                                                 posterBoard: input.posterBoard,
+                                                 statusBar: statusBar,
+                                                 deviceVersion: version,
+                                                 isIPhone: isIPhone,
+                                                 extraPayloads: iconBuild.payloads)
+                case .forcePartialRestore:
+                    try await engine.applyTweaksFPR(selection: input.selection,
+                                                    posterBoard: input.posterBoard,
+                                                    statusBar: statusBar,
+                                                    deviceVersion: version,
+                                                    isIPhone: isIPhone,
+                                                    extraPayloads: iconBuild.payloads,
+                                                    importPackage: nil)
+                case .forcePartialRestoreImport:
+                    try await engine.applyTweaksFPR(selection: input.selection,
+                                                    posterBoard: input.posterBoard,
+                                                    statusBar: statusBar,
+                                                    deviceVersion: version,
+                                                    isIPhone: isIPhone,
+                                                    extraPayloads: iconBuild.payloads,
+                                                    importPackage: runPackage)
+                case .getBackupFile:
+                    // Unreachable: beginRun routes Get Backup File
+                    // to beginBackupExportRun, never here.
+                    throw GoldenNuggetError("Get Backup File does not run through the apply path.")
+                }
+                await MainActor.run {
+                    finishRun()
+                    // Record what this run put on the device — the
+                    // data Remove Tweaks works from. Dropped features
+                    // and the PosterBoard reset action are not tweaks
+                    // left on the device, so they are not recorded.
+                    AppliedTweaksStore.recordApply(
+                        featureIDs: Array(selection.staged
+                            .subtracting(input.droppedFeatureIDs)
+                            .subtracting(["pb-reset"])),
+                        statusBarActive: statusBar.isActive,
+                        iconBundleIDs: iconStage.staged.map(\.bundleID),
+                        pairingFingerprint: PairingStore.fingerprint)
+                    logLines.append("[100%] Done — the engine finished and the device confirmed.")
+                    result = .succeeded
+                    showRestartSheet = true
+                    refreshFreeSpace()
+                }
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                await MainActor.run {
+                    let wasCancelling = cancelling
+                    finishRun()
+                    refreshFreeSpace()
+                    result = wasCancelling ? .cancelled : .failed(message)
+                }
+            }
+        }
+    }
+
+    /// Wire the engine's log / progress / ETA callbacks into this
+    /// view's state. Shared by every run (applies and Get Backup
+    /// File alike); `finishRun` clears them again.
+    private func installEngineCallbacks() {
         let engine = GoldenNuggetEngine.shared
         engine.onLog = { line in
             DispatchQueue.main.async {
@@ -299,50 +708,6 @@ struct ApplyView: View {
         }
         engine.onEta = { eta in
             DispatchQueue.main.async { etaText = eta }
-        }
-
-        applyTask = Task {
-            // The engine wants the device's own version line: read it
-            // from lockdownd when the connection is up, and fall back
-            // to this phone's system version (the device IS this
-            // phone) when it is not.
-            let identity = await DeviceIdentity.read()
-            let version = identity.version.isEmpty ? DeviceInfoEx.fullVersion : identity.version
-            let isIPhone = identity.productType.isEmpty
-                ? DeviceStatus.model.hasPrefix("iPhone")
-                : identity.isIPhone
-            do {
-                try await engine.applyTweaks(selection: input.selection,
-                                             posterBoard: input.posterBoard,
-                                             statusBar: statusBar,
-                                             deviceVersion: version,
-                                             isIPhone: isIPhone,
-                                             extraPayloads: iconBuild.payloads)
-                await MainActor.run {
-                    finishRun()
-                    // Record what this run put on the device — the
-                    // data Remove Tweaks works from. Dropped features
-                    // and the PosterBoard reset action are not tweaks
-                    // left on the device, so they are not recorded.
-                    AppliedTweaksStore.recordApply(
-                        featureIDs: Array(selection.staged
-                            .subtracting(input.droppedFeatureIDs)
-                            .subtracting(["pb-reset"])),
-                        statusBarActive: statusBar.isActive,
-                        iconBundleIDs: iconStage.staged.map(\.bundleID),
-                        pairingFingerprint: PairingStore.fingerprint)
-                    logLines.append("[100%] Done — the engine finished and the device confirmed.")
-                    result = .succeeded
-                    showRestartSheet = true
-                }
-            } catch {
-                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                await MainActor.run {
-                    let wasCancelling = cancelling
-                    finishRun()
-                    result = wasCancelling ? .cancelled : .failed(message)
-                }
-            }
         }
     }
 
