@@ -447,9 +447,10 @@ class GoldenNuggetEngine {
     // What is shared is what the research says must be identical: the
     // payload assembly below mirrors `applyTweaksRun` step for step, and
     // the restore itself is the same `runRestore` / `RestoreRunner`
-    // stack, so the options dictionary — `RemoveItemsNotRestored: false`
-    // present as a key, `RestoreShouldReboot: false` — is byte-for-byte
-    // the proven one.
+    // stack — byte-for-byte the proven one. (The Swift options dictionary
+    // sets `RestoreShouldReboot: false`; `RemoveItemsNotRestored` is not
+    // set in Swift and comes from the vendored Rust RestoreOptions
+    // defaults — v4 audit item c: wire-confirm before device testing.)
 
     /// Apply the selection by Force Partial Restore: a host-synthesised
     /// sqlite-27 partial backup, restored with **no backup phase** —
@@ -974,7 +975,10 @@ class GoldenNuggetEngine {
         // Branch-integrity guard (2026-10-24): the fork below rests on the
         // one version read the caller resolved, and a reporter on iOS
         // 26.7.1 was wrongly sent down the iOS 27 protective path by a
-        // single wrong read. So the read is repeated here — through the
+        // single wrong read. (Known gap, v4 audit item h: `resetPagesRun`
+        // and `removeAppliedTweaksRun` fork inline and never pass through
+        // here, so this guard does not cover page-reset / Remove Tweaks
+        // runs.) So the read is repeated here — through the
         // same path `resolvedDeviceVersion` uses, `DeviceIdentity.read()`
         // (lockdown ProductVersion) — immediately before the fork is
         // computed, and the two reads must agree on the major component

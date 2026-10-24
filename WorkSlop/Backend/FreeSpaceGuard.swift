@@ -118,8 +118,11 @@ enum FreeSpaceGuard {
         if purgeCount > 0 {
             parts.append("The device asked for space to be freed \(purgeCount) time(s) (purge requests).")
         }
+        // Both sources ultimately derive from a syslog capture — possibly
+        // an earlier run's — so both are labelled as log values, never
+        // presented as measured for the failed run itself.
         if let uploadSize = defaults.object(forKey: key("lastFailureUploadSize")) as? NSNumber {
-            parts.append("The device's computed backup size was \(formatBytes(uploadSize.int64Value)).")
+            parts.append("The device's computed backup size (from its log) was \(formatBytes(uploadSize.int64Value)).")
         } else if let uploadSize = lastKnownUploadSize() {
             parts.append("The device's computed backup size (from its log) was \(formatBytes(uploadSize)).")
         }

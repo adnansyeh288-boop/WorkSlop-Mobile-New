@@ -19,10 +19,16 @@ import SQLite3
 ///     registration gate fed by a previous device-authored backup, so a
 ///     host-synthesised manifest needs no protective pull to be accepted.
 ///   * The restore goes through the engine's shared `runRestore`, i.e. the
-///     existing `RestoreRunner` stack, whose options dictionary carries
-///     `RemoveItemsNotRestored: false` **present as a key**. That key is
-///     load-bearing: absent, the device defaults it to TRUE and annotates
-///     every domain for deletion in the removing phase.
+///     existing `RestoreRunner` stack — byte-for-byte the proven Normal
+///     path's restore. One honesty note (v4 audit, item c): the Swift
+///     options dictionary sets `RestoreShouldReboot: false` only;
+///     `RemoveItemsNotRestored` is NOT set in Swift — it comes from the
+///     vendored Rust layer's default RestoreOptions (see idevice.h), and
+///     its value on the mobilebackup2 path cannot be verified from this
+///     repo. That key is load-bearing: absent/false is what we need —
+///     absent-with-device-default-TRUE would annotate every domain for
+///     deletion in the removing phase. WIRE-CONFIRM before any FPR device
+///     test on a data-bearing phone.
 ///   * Payloads are restricted to the whitelist below. Three domains are
 ///     hard-banned: their `Domains.plist` entries carry
 ///     remove-on-restore path lists, so restoring them replaces whole
@@ -83,6 +89,12 @@ enum FPRDomainWhitelist {
         // TweakCompiler .GlobalPreferences HomeDomain mirror, and Icon
         // Themes' WebClip payloads (WebClipPayloads.build, the
         // extraPayloads an apply carries).
+        // NOTE (v4 audit item e): HomeDomain's own firmware entry carries
+        // a remove-on-restore list of its own (Library/MediaStream,
+        // Library/Preferences/com.apple.migration.plist per the FPR
+        // research). No staged tweak writes there, but a restore touching
+        // HomeDomain may still clear those paths device-side — residual
+        // risk to watch in the first device test, not a whitelist change.
         "HomeDomain",
         // TweakDomainMap: /var/db/ — e.g. the daemons location
         // (/var/db/com.apple.xpc.launchd/disabled.plist).

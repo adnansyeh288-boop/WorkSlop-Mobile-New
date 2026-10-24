@@ -242,7 +242,9 @@ enum ProtectiveBackup {
                 ?? error.localizedDescription
             let loweredError = errorText.lowercased()
             let isSpaceFailure = purgeCount > 0
-                || loweredError.contains("105")
+                || loweredError.contains("error 105")
+                || loweredError.contains("code=105")
+                || loweredError.contains("code 105")
                 || loweredError.contains("insufficient free disk space")
                 || loweredError.contains("free disk space")
             guard isSpaceFailure else { throw error }
