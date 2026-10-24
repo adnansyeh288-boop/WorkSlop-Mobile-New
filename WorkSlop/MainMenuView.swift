@@ -14,6 +14,10 @@ enum HomeRoute: Hashable {
     case log
     case removeTweaks
     case apply
+    // Standalone AirCard pages: NOT tweaks, NOT Apply methods — they write
+    // over AirLift directly and never go through staging or any method card.
+    case wallet
+    case passcode
 }
 
 struct MainMenuView: View {
@@ -44,6 +48,8 @@ struct MainMenuView: View {
                 case .log: LogView()
                 case .removeTweaks: RemoveTweaksView()
                 case .apply: ApplyView()
+                case .wallet: WalletCardView()
+                case .passcode: PasscodeThemeView()
                 }
             }
         }
@@ -589,6 +595,50 @@ struct MainMenuView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("menu-remove-tweaks")
+            Divider()
+                .padding(.leading, 46)
+            Button {
+                path.append(.wallet)
+            } label: {
+                HStack {
+                    Label {
+                        Text("Wallet Card Skins")
+                    } icon: {
+                        RowIcon(name: "creditcard")
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("menu-wallet")
+            Divider()
+                .padding(.leading, 46)
+            Button {
+                path.append(.passcode)
+            } label: {
+                HStack {
+                    Label {
+                        Text("Passcode Themes")
+                    } icon: {
+                        RowIcon(name: "lock")
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("menu-passcode")
         }
         .padding(.horizontal, 16)
         .background(cardBackground)
