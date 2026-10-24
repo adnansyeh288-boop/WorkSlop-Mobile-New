@@ -361,6 +361,19 @@ class GoldenNuggetEngine {
         let major = Int(version.split(separator: ".").first ?? "0") ?? 0
         log("device version for the manifest-format fork: \(version) (major \(major))")
 
+        // Product rule (user, 2026-10-24): on iOS 27 the status bar may only be
+        // applied through Force Partial Restore, never through this Normal run.
+        // The Apply page blocks the combination before the run starts; this is
+        // the same gate at the run layer, on the run's own resolved version,
+        // before any backup or restore work (and before the PosterBoard stage
+        // below touches the device). The FPR run does not pass through here.
+        if major == 27 && statusBar.isActive {
+            throw GoldenNuggetError("Status Bar tweaks on iOS 27 can only be applied with "
+                + "Force Partial Restore — this run is the Normal method, so it was stopped "
+                + "before any backup or restore work. Switch the method to Force Partial "
+                + "Restore and run again.")
+        }
+
         // PosterBoard, if the page has anything. Two mechanisms, chosen above:
         // the store's database first — a wallpaper exists only once it has a row in
         // it — and then the wallpapers themselves, unless AirLift is doing it, in
@@ -847,11 +860,13 @@ class GoldenNuggetEngine {
     private func checkAirliftCanApply(posterBoard: PosterBoardSelection, deviceVersion: String) throws {
         if posterBoard.fullReset || !posterBoard.resetModes.isEmpty {
             throw GoldenNuggetError("AirLift cannot reset the PosterBoard store — it only adds "
-                + "wallpapers. Switch the apply mode to \"Protective backup\" for a reset.")
+                + "wallpapers. Switch the apply mode to \"Protective backup\" on the "
+                + "PosterBoard page for a reset.")
         }
         if posterBoard.video != nil {
             throw GoldenNuggetError("AirLift cannot apply a PosterBoard video: its frames are "
-                + "staged for a restore. Switch the apply mode to \"Protective backup\".")
+                + "staged for a restore. Switch the apply mode to \"Protective backup\" on "
+                + "the PosterBoard page.")
         }
         let reason = Airlift.unsupportedReason(deviceVersion: deviceVersion)
         guard reason.isEmpty else { throw GoldenNuggetError(reason) }
