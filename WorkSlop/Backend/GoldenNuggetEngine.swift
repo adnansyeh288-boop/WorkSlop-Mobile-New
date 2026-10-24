@@ -342,16 +342,6 @@ class GoldenNuggetEngine {
             for warning in skipSetup.warnings { log("⚠️ \(warning)") }
         }
 
-        // The apply mode picks the mechanism, and it is the user's choice: the
-        // backup path below and the AirLift path install the same wallpapers two
-        // different ways, and neither can stand in for the other. The mode's
-        // constraints are checked *here*, before `prepareRun`, so a selection the
-        // chosen mode cannot honour fails without paying for a tunnel first.
-        let posterBoardMode = PosterBoardApplyModeSettings.current
-        if posterBoard.isActive && posterBoardMode == .airlift {
-            try checkAirliftCanApply(posterBoard: posterBoard, deviceVersion: deviceVersion)
-        }
-
         let udid = try await prepareRun()
         // Resolved once, here, because two stages need it: the PosterBoard compile (its
         // reset preferences change at 26.4) and the manifest-format fork inside
@@ -374,18 +364,12 @@ class GoldenNuggetEngine {
                 + "Restore and run again.")
         }
 
-        // PosterBoard, if the page has anything. Two mechanisms, chosen above:
-        // the store's database first — a wallpaper exists only once it has a row in
-        // it — and then the wallpapers themselves, unless AirLift is doing it, in
-        // which case there is no database and no payload: the injection into the
-        // container *is* the apply.
+        // PosterBoard, if the page has anything. One mechanism only — the
+        // original Nugget method: the store's database first (a wallpaper
+        // exists only once it has a row in it), then the wallpapers
+        // themselves, delivered through the backup/restore tail below.
         var posterBoardPayloads: [TweakPayload] = []
-        var posterBoardInjectedOverAirlift = false
-        if posterBoard.isActive && posterBoardMode == .airlift {
-            log("PosterBoard: \(posterBoard.describe) — over AirLift, no backup")
-            try await applyPosterBoardOverAirlift(selection: posterBoard, deviceVersion: version)
-            posterBoardInjectedOverAirlift = true
-        } else if posterBoard.isActive {
+        if posterBoard.isActive {
             log("PosterBoard: \(posterBoard.describe)")
             var structureVersion = PosterBoard.fallbackStructureVersion
             var database: URL?
@@ -426,22 +410,10 @@ class GoldenNuggetEngine {
         let payloads = skipSetup.payloads + tweakPayloads + statusBarPayloads
             + posterBoardPayloads + extraPayloads
 
-        // Wallpapers-only run in AirLift mode: the injection already happened and
-        // it resprings on its way out, so running the backup/restore tail here
-        // would buy a full protective pull for an empty payload list.
-        if payloads.isEmpty && posterBoardInjectedOverAirlift {
-            log("Apply succeeded: the wallpapers are in PosterBoard's container and it has "
-                + "resprung — no backup was taken.")
-            return
-        }
-
         try await deliver(payloads: payloads, udid: udid, version: version, label: "apply") {
             log("Apply succeeded: the device confirmed it finished.")
             log("Reboot the device so the injected preferences take effect.")
-            if posterBoardInjectedOverAirlift {
-                log("The wallpapers went in over AirLift and are already live; only the tweaks "
-                    + "above needed the reboot.")
-            } else if posterBoard.fullReset || !posterBoard.resetModes.isEmpty {
+            if posterBoard.fullReset || !posterBoard.resetModes.isEmpty {
                 log("The PosterBoard store was cleared. Reboot the device, then add wallpapers "
                     + "from a fresh database fetch — a reset makes the copy fetched before it "
                     + "stale.")
@@ -577,25 +549,17 @@ class GoldenNuggetEngine {
             for warning in skipSetup.warnings { log("⚠️ \(warning)") }
         }
 
-        // PosterBoard constraints, checked before `prepareRun` exactly as
-        // in the Normal run, plus the one constraint that is FPR's own:
-        let posterBoardMode = PosterBoardApplyModeSettings.current
-        if posterBoard.isActive && posterBoardMode == .airlift {
-            try checkAirliftCanApply(posterBoard: posterBoard, deviceVersion: deviceVersion)
-        }
-        if posterBoard.isActive && posterBoardMode == .backup
-            && !posterBoard.fullReset && posterBoard.resetModes.isEmpty {
-            // A non-reset backup-mode selection stages its payloads from
-            // the device's PosterBoard database, and that database is
-            // fetched with a backup pull (`PosterBoardBackup.fetch`) —
-            // which Force Partial Restore does not perform, by definition.
-            // Refused here, before any device work at all, rather than
-            // silently dropping the wallpapers or secretly pulling.
-            throw GoldenNuggetError("Force Partial Restore cannot apply PosterBoard "
-                + "wallpapers in backup mode: staging them needs the device's "
-                + "PosterBoard database, which is fetched with a backup pull — and "
-                + "Force Partial Restore performs no backup. Use the Normal Method "
-                + "for wallpapers, or switch PosterBoard to AirLift mode.")
+        // PosterBoard never rides Force Partial Restore (coordinator
+        // ruling D3): it is Normal-method only, and its own Apply on the
+        // PosterBoard page is the only entry that carries it. Refused
+        // here, before any device work at all, rather than silently
+        // dropping the wallpapers. General Apply no longer builds a
+        // PosterBoard selection at all, so this gate is defence in depth
+        // for any future caller that passes one in.
+        if posterBoard.isActive {
+            throw GoldenNuggetError("PosterBoard does not run through Force Partial "
+                + "Restore — use the PosterBoard page's own Apply, which runs "
+                + "the Normal backup/restore method.")
         }
 
         let udid = try await prepareRun()
@@ -639,49 +603,12 @@ class GoldenNuggetEngine {
                 + "this run synthesises sqlite-27 regardless.")
         }
 
-        // PosterBoard, with FPR's method differences:
-        //   * AirLift mode — exactly as Normal: the injection into the
-        //     container IS the apply, no payloads, no database.
-        //   * Backup mode, reset-only — payloads as Normal: a reset
-        //     needs no database, and FPR fetches none by design.
-        //   * Backup mode, non-reset — refused before `prepareRun`,
-        //     above.
-        var posterBoardPayloads: [TweakPayload] = []
-        var posterBoardInjectedOverAirlift = false
-        if posterBoard.isActive && posterBoardMode == .airlift {
-            log("PosterBoard: \(posterBoard.describe) — over AirLift, no backup")
-            try await applyPosterBoardOverAirlift(selection: posterBoard, deviceVersion: version)
-            posterBoardInjectedOverAirlift = true
-        } else if posterBoard.isActive {
-            log("PosterBoard: \(posterBoard.describe)")
-            log("PosterBoard: reset only — no database is needed, and none is fetched "
-                + "(Force Partial Restore fetches none by design).")
-            posterBoardPayloads = try await PosterBoard.compile(
-                selection: posterBoard,
-                structureVersion: PosterBoard.fallbackStructureVersion,
-                database: nil,
-                deviceVersion: version,
-                workingDirectory: PosterBoard.workDirectory,
-                log: { AppLog.write($0) })
-            let onDisk = posterBoardPayloads.filter { $0.source != nil }.count
-            let total = posterBoardPayloads.reduce(0) { $0 + $1.byteCount }
-            log("PosterBoard: \(posterBoardPayloads.count) payload(s), \(onDisk) of them on disk "
-                + "(\(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file)))")
-        }
-
-        // Same order as the Normal run: skip setup, tweaks, status bar,
-        // wallpapers, caller payloads — one array, one injection.
+        // PosterBoard: none. The gate before `prepareRun` already threw
+        // for any active PosterBoard selection, so no PB stage exists on
+        // this path — not even the reset-only route the old code kept.
+        // (D3: PB is Normal-method only.)
         let payloads = skipSetup.payloads + tweakPayloads + statusBarPayloads
-            + posterBoardPayloads + extraPayloads
-
-        // Wallpapers-only AirLift run with nothing to import: the
-        // injection already happened and resprung, exactly as in the
-        // Normal run's early return.
-        if payloads.isEmpty && posterBoardInjectedOverAirlift && importPackage == nil {
-            log("Apply succeeded: the wallpapers are in PosterBoard's container and it has "
-                + "resprung — no backup was taken.")
-            return
-        }
+            + extraPayloads
 
         // The whitelist gate: before synthesis, so a refused payload
         // costs no device work beyond the reads above.
@@ -699,16 +626,8 @@ class GoldenNuggetEngine {
                              label: "apply (force partial restore)") {
             log("Apply succeeded (Force Partial Restore): the device confirmed it finished.")
             log("Reboot the device so the injected preferences take effect.")
-            if posterBoardInjectedOverAirlift {
-                log("The wallpapers went in over AirLift and are already live; only the tweaks "
-                    + "above needed the reboot.")
-            } else if posterBoard.fullReset || !posterBoard.resetModes.isEmpty {
-                log("The PosterBoard store was cleared. Reboot the device, then add wallpapers "
-                    + "from a fresh database fetch — a reset makes the copy fetched before it "
-                    + "stale.")
-            } else if posterBoard.isActive {
-                log("Reboot the device so the PosterBoard store picks the new wallpapers up.")
-            }
+            // No PosterBoard tail here: the gate above guarantees no PB
+            // selection reaches this path.
         }
     }
 
@@ -852,52 +771,17 @@ class GoldenNuggetEngine {
         }
     }
 
-    /// Refuse a selection the AirLift path cannot carry, before anything is opened.
-    ///
-    /// A reset is a store operation and the video stage's frames are computed for
-    /// the restore, so neither can travel a container write. Saying so up front is
-    /// the alternative to accepting the selection and quietly dropping half of it.
-    private func checkAirliftCanApply(posterBoard: PosterBoardSelection, deviceVersion: String) throws {
-        if posterBoard.fullReset || !posterBoard.resetModes.isEmpty {
-            throw GoldenNuggetError("AirLift cannot reset the PosterBoard store — it only adds "
-                + "wallpapers. Switch the apply mode to \"Protective backup\" on the "
-                + "PosterBoard page for a reset.")
-        }
-        if posterBoard.video != nil {
-            throw GoldenNuggetError("AirLift cannot apply a PosterBoard video: its frames are "
-                + "staged for a restore. Switch the apply mode to \"Protective backup\" on "
-                + "the PosterBoard page.")
-        }
-        let reason = Airlift.unsupportedReason(deviceVersion: deviceVersion)
-        guard reason.isEmpty else { throw GoldenNuggetError(reason) }
-        guard FileManager.default.fileExists(atPath: AppPaths.pairingFile.path) else {
-            throw GoldenNuggetError("AirLift needs a pairing record and none is stored. Import one "
-                + "on the home page first.")
-        }
-    }
-
-    /// Run the AirLift PosterBoard injection, reporting through the run log.
-    private func applyPosterBoardOverAirlift(selection: PosterBoardSelection,
-                                             deviceVersion: String) async throws {
-        try await PosterBoardAirlift.apply(
-            selection: selection,
-            structureVersion: PosterBoard.fallbackStructureVersion,
-            deviceVersion: deviceVersion,
-            pairingPath: AppPaths.pairingFile.path,
-            log: { AppLog.write($0) },
-            progress: { overall in self.logProgress("posterboard airlift", overall) }
-        )
-    }
-
     /// Fetch only the device's PosterBoard database, without applying anything.
     ///
-    /// The page's own action, and the reference has the same one (its "Fetch
-    /// Database File" wizard in `pb_dialog.py`) for the same reason: the fetch is
-    /// the one stage of a wallpaper apply that can fail on its own terms — the
-    /// device decides whether it will upload the container — so being able to run
-    /// it alone, watch it, and retry is worth a button. The result is cached at
-    /// `PosterBoardBackup.cachedDatabase(udid:)`, and an apply reuses nothing:
-    /// it fetches its own, because a copy fetched before a reset is stale.
+    /// There is deliberately no UI button for this (coordinator ruling D6):
+    /// a PosterBoard apply fetches its own database in-run, and a copy
+    /// fetched before a reset is stale, so a fetched copy must never be an
+    /// apply input. The reference has the same standalone fetch (its "Fetch
+    /// Database File" wizard in `pb_dialog.py`) for the same reason: the fetch
+    /// is the one stage of a wallpaper apply that can fail on its own terms —
+    /// the device decides whether it will upload the container. The result is
+    /// cached at `PosterBoardBackup.cachedDatabase(udid:)`, and an apply reuses
+    /// nothing: it fetches its own.
     func fetchPosterBoardDatabase() async throws {
         try await loggedRun("posterboard database fetch") {
             try await fetchPosterBoardDatabaseRun()
@@ -919,42 +803,101 @@ class GoldenNuggetEngine {
         log("PosterBoard database fetched and validated.")
     }
 
-    /// Inject the PosterBoard packs over AirLift, and nothing else.
+    // MARK: - Run: PosterBoard only (its own Apply / Remove menus)
+
+    /// Apply or reset PosterBoard — and nothing else — through the one
+    /// remaining mechanism, the original Nugget backup/restore method.
     ///
-    /// The home page's Apply is one combined run — tweaks and wallpapers ride
-    /// together through a single protective backup — which is right for a
-    /// backup-mode selection and wrong for this one: AirLift writes the
-    /// descriptors straight into the container, so a run that carries nothing
-    /// but wallpapers should not buy a backup at all. That early return lives
-    /// in the combined path and is reached only when no tweak is selected, so
-    /// this is the same injection on its own, with no payloads to deliver and
-    /// no mode switch to remember.
+    /// This is deliberately NOT `applyTweaksRun` with empty selections
+    /// (coordinator ruling D7): that run would drag skip-setup payloads
+    /// and the status-bar iOS 27 gate along with a "PosterBoard-only" run.
+    /// What this run does carry, verbatim from the Normal run's PosterBoard
+    /// stage, is: the reset-no-database shortcut, the in-run device
+    /// database fetch for tendies, `PosterBoard.compile` (so the
+    /// compile-order rule — reset beats tendies, never mixed — and the
+    /// 5-file / 10-descriptor caps enforced by the caller hold), and the
+    /// shared `deliver()` tail. `deliver()` is the same tail a bundled
+    /// run used, so the iOS 26 MBDB / iOS 27 protective-backup fork, the
+    /// prune-and-inject step (including its `posterBoardSnapshot: nil`
+    /// default — no live caller passes a snapshot, bundled runs included),
+    /// and the restore are byte-for-byte the bundled path's.
     ///
-    /// - Parameters:
-    ///   - selection: the page's selection. Only its packs are honoured, exactly
-    ///     as in the combined run.
-    ///   - deviceVersion: what the page already read; the constraints are checked
-    ///     against it rather than resolved again over a second connection.
-    func applyPosterBoardViaAirlift(_ selection: PosterBoardSelection,
-                                    deviceVersion: String) async throws {
-        try await loggedRun("posterboard airlift apply") {
-            try await applyPosterBoardViaAirliftRun(selection, deviceVersion: deviceVersion)
+    /// What this run does NOT do, on purpose: it never touches
+    /// `GoldenNuggetPresets` (a PB-only run must not overwrite the general
+    /// rollback preset with an empty selection), never records into
+    /// `AppliedTweaksStore` (PB ids are excluded there by design — the
+    /// caller does not record either), and never enters Force Partial
+    /// Restore (PB is Normal-method only).
+    func applyPosterBoardOnly(_ selection: PosterBoardSelection,
+                              deviceVersion: String) async throws {
+        try await loggedRun("posterboard apply") {
+            try await applyPosterBoardOnlyRun(selection, deviceVersion: deviceVersion)
         }
     }
 
-    private func applyPosterBoardViaAirliftRun(_ selection: PosterBoardSelection,
-                                               deviceVersion: String) async throws {
+    private func applyPosterBoardOnlyRun(_ selection: PosterBoardSelection,
+                                         deviceVersion: String) async throws {
         AppLog.shared.memory.reset()
         clearCancel()
         clearProgress()
-        let stage = StageTimer("RUN posterboard airlift apply")
+        let stage = StageTimer("RUN posterboard apply")
         defer { stage.done() }
 
-        try checkAirliftCanApply(posterBoard: selection, deviceVersion: deviceVersion)
-        log("PosterBoard: \(selection.describe) — over AirLift, no backup")
-        try await applyPosterBoardOverAirlift(selection: selection, deviceVersion: deviceVersion)
-        log("PosterBoard: injected over AirLift and resprung. No backup was taken, and no "
-            + "tweak was delivered — the home page's Apply is what delivers those.")
+        guard selection.isActive else {
+            throw GoldenNuggetError("Nothing selected on the PosterBoard page: "
+                + "stage Tendies wallpapers or a PosterBoard reset first.")
+        }
+
+        let udid = try await prepareRun()
+        let version = try await resolvedDeviceVersion(deviceVersion)
+        let major = Int(version.split(separator: ".").first ?? "0") ?? 0
+        log("device version for the manifest-format fork: \(version) (major \(major))")
+
+        log("PosterBoard: \(selection.describe)")
+        var structureVersion = PosterBoard.fallbackStructureVersion
+        var database: URL?
+        if selection.fullReset || !selection.resetModes.isEmpty {
+            // A reset needs no database, so it needs no fetch and no exchange.
+            log("PosterBoard: reset only — no database is needed, and none is fetched.")
+        } else {
+            let fetched = try await PosterBoardBackup.fetch(
+                backupRoot: AppPaths.posterBoardFetchRoot, udid: udid,
+                // The same fork `deliver` is about to take, from the same number.
+                ios27: major >= 27 && !DevSettings.effective.forcePartialRestore,
+                onProgress: { overall in
+                    self.logProgress("posterboard backup progress", overall)
+                },
+                log: { AppLog.write($0) })
+            database = fetched.database
+            structureVersion = fetched.structureVersion
+        }
+        let payloads = try await PosterBoard.compile(
+            selection: selection,
+            structureVersion: structureVersion,
+            database: database,
+            deviceVersion: version,
+            workingDirectory: PosterBoard.workDirectory,
+            log: { AppLog.write($0) })
+        let onDisk = payloads.filter { $0.source != nil }.count
+        let total = payloads.reduce(0) { $0 + $1.byteCount }
+        log("PosterBoard: \(payloads.count) payload(s), \(onDisk) of them on disk "
+            + "(\(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file)))")
+        guard !payloads.isEmpty else {
+            throw GoldenNuggetError("PosterBoard compiled to nothing — no payload was "
+                + "produced for this selection, so no backup or restore was run.")
+        }
+
+        try await deliver(payloads: payloads, udid: udid, version: version,
+                          label: "posterboard apply") {
+            log("PosterBoard apply succeeded: the device confirmed it finished.")
+            if selection.fullReset || !selection.resetModes.isEmpty {
+                log("The PosterBoard store was cleared. Reboot the device, then add wallpapers "
+                    + "from a fresh database fetch — a reset makes the copy fetched before it "
+                    + "stale.")
+            } else {
+                log("Reboot the device so the PosterBoard store picks the new wallpapers up.")
+            }
+        }
     }
 
     // MARK: - The shared delivery tail

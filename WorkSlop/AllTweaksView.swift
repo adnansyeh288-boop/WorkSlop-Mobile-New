@@ -95,12 +95,6 @@ struct TweakListView: View {
     /// The saved white-point value, refreshed on appear for the same
     /// reason as the two stores above.
     @State private var highlightWhiteShown = HighlightWhiteStore.value
-    /// The PosterBoard apply mode, mirrored from
-    /// `PosterBoardApplyModeSettings` (UserDefaults, unobserved like
-    /// the stores above) so the picker on the PosterBoard page shows
-    /// the stored value and writes changes straight back.
-    @State private var posterBoardMode: PosterBoardApplyMode = PosterBoardApplyModeSettings.current
-
     var body: some View {
         ZStack {
             SkyBackground()
@@ -194,33 +188,6 @@ struct TweakListView: View {
                 } footer: {
                     if let footer = group.footer { Text(footer) }
                 }
-                if group.id == "PosterBoard" {
-                    // The apply mode is the user's choice — the two
-                    // mechanisms install the same wallpapers different
-                    // ways, and only "Protective backup" can reset the
-                    // store. Until this picker existed the setting had
-                    // no UI at all, so the default (AirLift) silently
-                    // made every reset fail.
-                    Section {
-                        Picker("Apply mode", selection: $posterBoardMode) {
-                            ForEach(PosterBoardApplyMode.allCases) { mode in
-                                Label(mode.title, systemImage: mode.symbol)
-                                    .tag(mode)
-                            }
-                        }
-                        .accessibilityIdentifier("posterboard-apply-mode-picker")
-                        .onChange(of: posterBoardMode) { _, newValue in
-                            PosterBoardApplyModeSettings.current = newValue
-                        }
-                    } header: {
-                        Text("Apply mode")
-                    } footer: {
-                        Text(posterBoardMode.summary
-                             + (posterBoardMode.supportsReset
-                                ? " This is the mode that can reset the PosterBoard store."
-                                : " A reset needs the \"Protective backup\" mode."))
-                    }
-                }
             }
             .scrollContentBackground(.hidden)
             .modifier(ShellListInsets(enabled: embedded))
@@ -232,7 +199,6 @@ struct TweakListView: View {
             cornerRadiusShown = CornerRadiusStore.value
             footnoteShown = FootnoteStore.text
             highlightWhiteShown = HighlightWhiteStore.value
-            posterBoardMode = PosterBoardApplyModeSettings.current
         }
     }
 }

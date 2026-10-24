@@ -214,7 +214,7 @@ enum GNMapping {
         switch feature.id {
         case "pb-tendies":
             lines.append("Delivered by the engine's PosterBoard stage, from the .tendies files in PosterBoard Files.")
-            lines.append("Delivery follows the apply mode picked on the PosterBoard page: AirLift needs iOS 26.2 or newer; the protective-backup mode works on every supported iOS.")
+            lines.append("Delivered only by the PosterBoard page's own Apply, through a protective backup and restore (the original Nugget method). General Apply never carries PosterBoard.")
         case "pb-reset":
             lines.append("Clears the Collections, Suggested Photos and gallery-cache descriptor folders; PosterBoard rebuilds them on next use.")
         case "dm-recommended":
@@ -259,41 +259,17 @@ enum GNSelectionBuilder {
         var input = GNApplyInput()
         for id in staged.sorted() {
             switch id {
-            case "pb-tendies":
-                var tendies: [PosterBoardTendie] = []
-                var descriptorTotal = 0
-                for url in TendiesStore.urls(kind: "Tendies") {
-                    let parsed: PosterBoardTendie
-                    do {
-                        parsed = try PosterBoardTendie(url: url)
-                    } catch {
-                        input.tendieFailures.append(url.lastPathComponent)
-                        continue
-                    }
-                    // The advertised caps, enforced here at staging:
-                    // at most `fileLimit` files and `descriptorLimit`
-                    // descriptors ride one apply. Files past a cap
-                    // stay in the store for a later apply and are
-                    // named in `tendieLimitSkips`, never dropped
-                    // silently (the constants had no caller before).
-                    if tendies.count >= PosterBoardImports.fileLimit {
-                        input.tendieLimitSkips.append(
-                            "\(parsed.name) — over the \(PosterBoardImports.fileLimit)-file limit for one apply")
-                        continue
-                    }
-                    if descriptorTotal + parsed.descriptorCount > PosterBoardImports.descriptorLimit {
-                        input.tendieLimitSkips.append(
-                            "\(parsed.name) — would take this apply past \(PosterBoardImports.descriptorLimit) descriptors")
-                        continue
-                    }
-                    descriptorTotal += parsed.descriptorCount
-                    tendies.append(parsed)
-                }
-                input.posterBoard.tendies = tendies
-                input.mappedFeatures += 1
-            case "pb-reset":
-                input.posterBoard.resetModes = Set(PosterBoardResetMode.allCases)
-                input.mappedFeatures += 1
+            case "pb-tendies", "pb-reset":
+                // PosterBoard never rides general Apply any more (PosterBoard
+                // fix, 2026-10-24): it has its own Apply on the PosterBoard
+                // page, built by `buildPosterBoard` below. A staged PB toggle
+                // reaching general Apply is therefore reported as dropped —
+                // never silently ignored — and ApplyView's "nothing
+                // deliverable" failure fires when PB is all that is staged.
+                // `GNApplyInput.posterBoard` stays empty here on purpose;
+                // the engine's Normal run keeps its PB stage for the PB-only
+                // entry, and its FPR run refuses any PB selection outright.
+                input.droppedFeatureIDs.append(id)
             default:
                 let specs = GNMapping.specs(forFeature: id)
                 if specs.isEmpty {
@@ -346,6 +322,55 @@ enum GNSelectionBuilder {
         }
         return input
     }
+
+    /// PosterBoard's own selection, for the PosterBoard page's Apply
+    /// only — never for general Apply. This is the staged-toggle model
+    /// the old bundled run used, moved verbatim: `pb-tendies` on means
+    /// every imported .tendies file, capped at the advertised 5 files /
+    /// 10 descriptors (over-cap files land in `tendieLimitSkips`, never
+    /// silently dropped); `pb-reset` on means all three selective reset
+    /// modes. Payload semantics are untouched — only the trigger moved.
+    /// `fullReset` and video stay engine-dead: no UI sets them, and this
+    /// builder does not invent them.
+    struct PosterBoardBuild {
+        var selection = PosterBoardSelection()
+        var tendieFailures: [String] = []
+        var tendieLimitSkips: [String] = []
+    }
+
+    static func buildPosterBoard(staged: Set<String>) -> PosterBoardBuild {
+        var build = PosterBoardBuild()
+        if staged.contains("pb-tendies") {
+            var tendies: [PosterBoardTendie] = []
+            var descriptorTotal = 0
+            for url in TendiesStore.urls(kind: "Tendies") {
+                let parsed: PosterBoardTendie
+                do {
+                    parsed = try PosterBoardTendie(url: url)
+                } catch {
+                    build.tendieFailures.append(url.lastPathComponent)
+                    continue
+                }
+                if tendies.count >= PosterBoardImports.fileLimit {
+                    build.tendieLimitSkips.append(
+                        "\(parsed.name) — over the \(PosterBoardImports.fileLimit)-file limit for one apply")
+                    continue
+                }
+                if descriptorTotal + parsed.descriptorCount > PosterBoardImports.descriptorLimit {
+                    build.tendieLimitSkips.append(
+                        "\(parsed.name) — would take this apply past \(PosterBoardImports.descriptorLimit) descriptors")
+                    continue
+                }
+                descriptorTotal += parsed.descriptorCount
+                tendies.append(parsed)
+            }
+            build.selection.tendies = tendies
+        }
+        if staged.contains("pb-reset") {
+            build.selection.resetModes = Set(PosterBoardResetMode.allCases)
+        }
+        return build
+    }
 }
 
 /// The REAL number of tweaks a staged set delivers.
@@ -362,10 +387,11 @@ enum ApplyCounter {
         var n = 0
         for id in staged {
             switch id {
-            case "pb-tendies":
-                n += TendiesStore.urls(kind: "Tendies").count
-            case "pb-reset":
-                n += PosterBoardResetMode.allCases.count
+            case "pb-tendies", "pb-reset":
+                // PosterBoard no longer rides general Apply, so it no
+                // longer counts toward a general Apply's tweak total —
+                // the PosterBoard page's own Apply is what delivers it.
+                break
             default:
                 n += GNMapping.specs(forFeature: id).count
             }
