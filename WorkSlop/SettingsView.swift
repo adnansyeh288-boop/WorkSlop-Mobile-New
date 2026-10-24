@@ -5,6 +5,10 @@ import SwiftUI
 /// was removed and the app pins AppleLanguages to English at launch
 /// (see WorkSlopApp). Localizable.xcstrings is left untouched.
 struct SettingsView: View {
+    /// Mirrors `SkipSetupSettings.shared` (an @AppStorage flag with no
+    /// observable publisher the row could bind to); the toggle writes
+    /// through `setSkipSetup`, the flag's own setter.
+    @State private var skipSetupEnabled = SkipSetupSettings.shared.skipSetupEnabled
     @State private var mediaStoreBytes: Int64 = 0
     @State private var containerFree: Int64 = 0
     @State private var showClearMediaConfirmation = false
@@ -31,6 +35,18 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Text("Info")
+            }
+
+            Section {
+                Toggle("Skip Setup", isOn: $skipSetupEnabled)
+                    .onChange(of: skipSetupEnabled) { _, newValue in
+                        SkipSetupSettings.shared.setSkipSetup(newValue)
+                    }
+                Text("When on, every apply also writes the two skip-setup files, ahead of the tweaks, so the device skips the Setup Assistant screens after a restore. On by default — the same default as the reference.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Apply")
             }
 
             Section {
