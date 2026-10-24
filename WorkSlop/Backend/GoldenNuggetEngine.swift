@@ -438,6 +438,266 @@ class GoldenNuggetEngine {
         }
     }
 
+    // MARK: - Run: Force Partial Restore (v4 Options 2 + 3)
+    //
+    // A PARALLEL entry, not a branch of the one above: `applyTweaks` /
+    // `applyTweaksRun` / `deliver` keep their exact Normal behaviour, and
+    // this path shares nothing with the iOS 26 partial-restore
+    // construction either (the locked v4 rule — the two must not touch).
+    // What is shared is what the research says must be identical: the
+    // payload assembly below mirrors `applyTweaksRun` step for step, and
+    // the restore itself is the same `runRestore` / `RestoreRunner`
+    // stack, so the options dictionary — `RemoveItemsNotRestored: false`
+    // present as a key, `RestoreShouldReboot: false` — is byte-for-byte
+    // the proven one.
+
+    /// Apply the selection by Force Partial Restore: a host-synthesised
+    /// sqlite-27 partial backup, restored with **no backup phase** —
+    /// iOS 27 only (Options 2 and 3 of the v4 menu; `importPackage`
+    /// non-nil is Option 3, whose rows `FPRImport.merge` folds in before
+    /// the tweaks).
+    ///
+    /// The wrapper mirrors `applyTweaks` exactly, and that *is* the
+    /// Remove-Tweaks / rollback bookkeeping: `prepareRollback()` inside
+    /// the `loggedRun` bracket before the run, `saveLastApplied(...)`
+    /// after it returns — reached only on success, as in `applyTweaks`.
+    /// The remaining record —
+    /// `AppliedTweaksStore.recordApply` — is written by the *view* after
+    /// any successful engine apply (see `ApplyView`), not by the engine,
+    /// so a caller of this entry records an FPR apply the same way it
+    /// records a Normal one, with no engine-side difference.
+    func applyTweaksFPR(
+        selection: TweakSelection,
+        posterBoard: PosterBoardSelection,
+        statusBar: StatusBarSelection,
+        deviceVersion: String,
+        isIPhone: Bool,
+        extraPayloads: [TweakPayload] = [],
+        importPackage: URL? = nil
+    ) async throws {
+        try await loggedRun("apply (force partial restore)") {
+            GoldenNuggetPresets.prepareRollback()
+            try await applyTweaksFPRRun(selection: selection,
+                                        posterBoard: posterBoard,
+                                        statusBar: statusBar,
+                                        deviceVersion: deviceVersion,
+                                        isIPhone: isIPhone,
+                                        extraPayloads: extraPayloads,
+                                        importPackage: importPackage)
+        }
+        _ = GoldenNuggetPresets.saveLastApplied(selection: selection,
+                                                deviceModel: isIPhone ? "iPhone" : "iPad",
+                                                iosVersion: deviceVersion)
+    }
+
+    private func applyTweaksFPRRun(
+        selection: TweakSelection,
+        posterBoard: PosterBoardSelection,
+        statusBar: StatusBarSelection,
+        deviceVersion: String,
+        isIPhone: Bool,
+        extraPayloads: [TweakPayload] = [],
+        importPackage: URL? = nil
+    ) async throws {
+        AppLog.shared.memory.reset()
+        clearCancel()
+        clearProgress()
+        let runStage = StageTimer("RUN apply (force partial restore)")
+        defer { runStage.done() }
+
+        log("[FPR] Force Partial Restore"
+            + "\(importPackage != nil ? " + Import Backup" : "") — a host-synthesised "
+            + "sqlite-27 partial restore. No protective backup will be pulled "
+            + "and no AFC media pull will run in this method; both absences "
+            + "are the method, not an omission.")
+
+        // Payload assembly: the same steps, in the same order, as
+        // `applyTweaksRun` — compile before the device is touched, status
+        // bar on the caller's version, skip setup ahead of the tweaks.
+        // Duplicated rather than factored out of `applyTweaksRun` so the
+        // proven path's code is not touched to share it.
+        let compiled = TweakCompiler.compile(selection: selection,
+                                             deviceVersion: deviceVersion,
+                                             isIPhone: isIPhone)
+        let tweakPayloads = compiled.payloads
+
+        var statusBarPayloads: [TweakPayload] = []
+        if statusBar.isActive {
+            let mechanism = StatusBarMechanism.mechanism(for: deviceVersion)
+            let built = try statusBar.payload(for: mechanism)
+            statusBarPayloads = [TweakPayload(domain: mechanism.domain,
+                                              relativePath: mechanism.restorePath,
+                                              contents: built.data)]
+            log("Status bar: \(statusBar.overrides.activeCount) override(s)"
+                + " \(statusBar.overrides.activeCount == 0 ? "(a reset)" : "") via "
+                + "\(mechanism == .classic ? "the classic struct" : "the iOS 27 archive") "
+                + "→ \(statusBarPayloads[0].label) (\(built.data.count) B)")
+            for field in built.dropped {
+                log("  ⚠️ \(field) has no counterpart in the iOS 27 archive and was not delivered")
+            }
+        }
+
+        let skipSetup = SkipSetupSettings.shared.skipSetupEnabled
+            ? SkipSetup.build(supervised: false, organizationName: "")
+            : SkipSetup.Build(payloads: [], warnings: [])
+
+        guard !tweakPayloads.isEmpty || !skipSetup.payloads.isEmpty || posterBoard.isActive
+                || statusBar.isActive || !extraPayloads.isEmpty || importPackage != nil else {
+            throw GoldenNuggetError("Nothing to apply: no tweak is enabled (or every enabled one "
+                + "was skipped), skip setup is off, the status bar is untouched, there is "
+                + "nothing selected on the PosterBoard page, and no backup package was "
+                + "chosen to import.")
+        }
+        if !extraPayloads.isEmpty {
+            log("Extra payloads: \(extraPayloads.count) file(s) from the caller")
+            for payload in extraPayloads {
+                log("  → \(payload.domain):\(payload.relativePath)")
+            }
+        }
+        log("Tweaks: \(tweakPayloads.count) file(s) from \(compiled.locations.count) plist(s)")
+        for location in compiled.locations { log("  → \(location.rawValue)") }
+        for item in compiled.skipped { log("  ⚠️ skipped \(item.label): \(item.reason)") }
+        if !skipSetup.payloads.isEmpty {
+            log("Skip setup: \(skipSetup.payloads.count) file(s) ahead of the tweaks")
+            for payload in skipSetup.payloads { log("  → \(payload.label)") }
+            for warning in skipSetup.warnings { log("⚠️ \(warning)") }
+        }
+
+        // PosterBoard constraints, checked before `prepareRun` exactly as
+        // in the Normal run, plus the one constraint that is FPR's own:
+        let posterBoardMode = PosterBoardApplyModeSettings.current
+        if posterBoard.isActive && posterBoardMode == .airlift {
+            try checkAirliftCanApply(posterBoard: posterBoard, deviceVersion: deviceVersion)
+        }
+        if posterBoard.isActive && posterBoardMode == .backup
+            && !posterBoard.fullReset && posterBoard.resetModes.isEmpty {
+            // A non-reset backup-mode selection stages its payloads from
+            // the device's PosterBoard database, and that database is
+            // fetched with a backup pull (`PosterBoardBackup.fetch`) —
+            // which Force Partial Restore does not perform, by definition.
+            // Refused here, before any device work at all, rather than
+            // silently dropping the wallpapers or secretly pulling.
+            throw GoldenNuggetError("Force Partial Restore cannot apply PosterBoard "
+                + "wallpapers in backup mode: staging them needs the device's "
+                + "PosterBoard database, which is fetched with a backup pull — and "
+                + "Force Partial Restore performs no backup. Use the Normal Method "
+                + "for wallpapers, or switch PosterBoard to AirLift mode.")
+        }
+
+        let udid = try await prepareRun()
+        let version = try await resolvedDeviceVersion(deviceVersion)
+        let major = Int(version.split(separator: ".").first ?? "0") ?? 0
+        log("device version for the Force Partial Restore gate: \(version) (major \(major))")
+
+        // The same branch-integrity re-read `deliver` performs: this
+        // run's == 27 gate below rests on the read just resolved, and a
+        // wrong read in the dangerous direction (a 26 device read as 27)
+        // would hand it a construction its restore cannot take. The
+        // re-read goes through the same path (`DeviceIdentity.read()`),
+        // and a disagreement — or an unreadable re-read — stops the run
+        // before any synthesis or restore.
+        let branchReread = await DeviceIdentity.read()
+        let branchRereadMajor = Int(branchReread.version.split(separator: ".").first ?? "0") ?? 0
+        log("[BRANCH] initial read: \(version) (major \(major)); "
+            + "FPR re-read: \(branchReread.version.isEmpty ? "unreadable" : branchReread.version) "
+            + "(major \(branchRereadMajor)); fork: force partial restore")
+        guard !branchReread.version.isEmpty, branchRereadMajor == major else {
+            throw GoldenNuggetError(
+                "Device version read changed during setup (was \(version), now "
+                + "\(branchReread.version.isEmpty ? "unreadable" : branchReread.version)) "
+                + "— run stopped before any backup or restore. Reconnect the tunnel and retry.")
+        }
+
+        // The construction is 27-specific (Status 3.3 / Manifest 10.0 /
+        // SystemDomainsVersion 24.0), so the gate is exact, not >=.
+        guard major == 27 else {
+            throw GoldenNuggetError("Force Partial Restore is iOS 27 only — "
+                + "this device reports iOS \(version).")
+        }
+
+        // The legacy dev switch must not leak into this run: it selects
+        // the MBDB branch inside `deliver`, a path FPR never takes, and
+        // on iOS 27 that branch's synthesis is the one the device
+        // rejects. Noted in the log when it is on, obeyed never.
+        if DevSettings.effective.forcePartialRestore {
+            log("[FPR] development mode's legacy force-partial-restore switch is on — "
+                + "FPR ignores it: that switch selects the legacy MBDB branch, and "
+                + "this run synthesises sqlite-27 regardless.")
+        }
+
+        // PosterBoard, with FPR's method differences:
+        //   * AirLift mode — exactly as Normal: the injection into the
+        //     container IS the apply, no payloads, no database.
+        //   * Backup mode, reset-only — payloads as Normal: a reset
+        //     needs no database, and FPR fetches none by design.
+        //   * Backup mode, non-reset — refused before `prepareRun`,
+        //     above.
+        var posterBoardPayloads: [TweakPayload] = []
+        var posterBoardInjectedOverAirlift = false
+        if posterBoard.isActive && posterBoardMode == .airlift {
+            log("PosterBoard: \(posterBoard.describe) — over AirLift, no backup")
+            try await applyPosterBoardOverAirlift(selection: posterBoard, deviceVersion: version)
+            posterBoardInjectedOverAirlift = true
+        } else if posterBoard.isActive {
+            log("PosterBoard: \(posterBoard.describe)")
+            log("PosterBoard: reset only — no database is needed, and none is fetched "
+                + "(Force Partial Restore fetches none by design).")
+            posterBoardPayloads = try await PosterBoard.compile(
+                selection: posterBoard,
+                structureVersion: PosterBoard.fallbackStructureVersion,
+                database: nil,
+                deviceVersion: version,
+                workingDirectory: PosterBoard.workDirectory,
+                log: { AppLog.write($0) })
+            let onDisk = posterBoardPayloads.filter { $0.source != nil }.count
+            let total = posterBoardPayloads.reduce(0) { $0 + $1.byteCount }
+            log("PosterBoard: \(posterBoardPayloads.count) payload(s), \(onDisk) of them on disk "
+                + "(\(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file)))")
+        }
+
+        // Same order as the Normal run: skip setup, tweaks, status bar,
+        // wallpapers, caller payloads — one array, one injection.
+        let payloads = skipSetup.payloads + tweakPayloads + statusBarPayloads
+            + posterBoardPayloads + extraPayloads
+
+        // Wallpapers-only AirLift run with nothing to import: the
+        // injection already happened and resprung, exactly as in the
+        // Normal run's early return.
+        if payloads.isEmpty && posterBoardInjectedOverAirlift && importPackage == nil {
+            log("Apply succeeded: the wallpapers are in PosterBoard's container and it has "
+                + "resprung — no backup was taken.")
+            return
+        }
+
+        // The whitelist gate: before synthesis, so a refused payload
+        // costs no device work beyond the reads above.
+        try FPRDomainWhitelist.validate(payloads)
+
+        // No `protectiveBackup()` call and no AFC media pull exist on
+        // this path — the synthesis replaces both.
+        let backupRoot = try await ForcePartialRestore.makeBackup(
+            udid: udid,
+            payloads: payloads,
+            importPackage: importPackage,
+            log: { AppLog.write($0) })
+
+        try await runRestore(backupRoot: backupRoot, udid: udid,
+                             label: "apply (force partial restore)") {
+            log("Apply succeeded (Force Partial Restore): the device confirmed it finished.")
+            log("Reboot the device so the injected preferences take effect.")
+            if posterBoardInjectedOverAirlift {
+                log("The wallpapers went in over AirLift and are already live; only the tweaks "
+                    + "above needed the reboot.")
+            } else if posterBoard.fullReset || !posterBoard.resetModes.isEmpty {
+                log("The PosterBoard store was cleared. Reboot the device, then add wallpapers "
+                    + "from a fresh database fetch — a reset makes the copy fetched before it "
+                    + "stale.")
+            } else if posterBoard.isActive {
+                log("Reboot the device so the PosterBoard store picks the new wallpapers up.")
+            }
+        }
+    }
+
     /// Refuse a selection the AirLift path cannot carry, before anything is opened.
     ///
     /// A reset is a store operation and the video stage's frames are computed for
@@ -570,6 +830,29 @@ class GoldenNuggetEngine {
         // longer the last word on which branch runs -- only the default for it. Read
         // once, here, and both decisions below quote the same snapshot.
         let dev = DevSettings.effective
+
+        // Branch-integrity guard (2026-10-24): the fork below rests on the
+        // one version read the caller resolved, and a reporter on iOS
+        // 26.7.1 was wrongly sent down the iOS 27 protective path by a
+        // single wrong read. So the read is repeated here — through the
+        // same path `resolvedDeviceVersion` uses, `DeviceIdentity.read()`
+        // (lockdown ProductVersion) — immediately before the fork is
+        // computed, and the two reads must agree on the major component
+        // or the run stops BEFORE any backup or restore work. When they
+        // agree nothing changes: same fork, same lines after this one.
+        let branchReread = await DeviceIdentity.read()
+        let branchRereadMajor = Int(branchReread.version.split(separator: ".").first ?? "0") ?? 0
+        let branchFork = major >= 27 && !dev.forcePartialRestore ? "protective" : "partial"
+        log("[BRANCH] initial read: \(version) (major \(major)); "
+            + "pre-fork re-read: \(branchReread.version.isEmpty ? "unreadable" : branchReread.version) "
+            + "(major \(branchRereadMajor)); fork: \(branchFork)")
+        guard !branchReread.version.isEmpty, branchRereadMajor == major else {
+            throw GoldenNuggetError(
+                "Device version read changed during setup (was \(version), now "
+                + "\(branchReread.version.isEmpty ? "unreadable" : branchReread.version)) "
+                + "— run stopped before any backup or restore. Reconnect the tunnel and retry.")
+        }
+
         let ios27 = major >= 27 && !dev.forcePartialRestore
         let hasEligibility = payloads.contains { $0.domain == "SysContainerDomain-com.apple.eligibilityd" }
         if hasEligibility && !ios27 {
