@@ -16,7 +16,7 @@ targets:
         CFBundleName: WorkSlop
         CFBundleDisplayName: WorkSlop
         CFBundleShortVersionString: "4.0"
-        CFBundleVersion: "4"
+        CFBundleVersion: "5"
         UILaunchScreen: {}
         NSLocalNetworkUsageDescription: "WorkSlop advertises this iPhone as a pairing host on your local network so it can generate its own pairing file (Get Pairing File). Nothing is sent to the internet."
         NSBonjourServices:
@@ -52,7 +52,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.adnan120hz.workslop
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "4.0"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"
   WorkSlopUITests:
