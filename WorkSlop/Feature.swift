@@ -326,6 +326,33 @@ enum CornerRadiusStore {
     }
 }
 
+/// The user-chosen white point for the Liquid Glass highlight tweak.
+///
+/// The spec (`SolariumHighlightWhite`) is a NUMBER, 0.0–1.0 in 0.05
+/// steps — but until this store existed the feature rendered as a
+/// plain toggle, so every apply wrote the registry default 1.0 and
+/// the number was unreachable. Stored in UserDefaults like the corner
+/// radius; the selection builder overrides the spec's default with
+/// it at apply time. Defaults to the spec's own 1.0, so a device that
+/// never opens the editor writes exactly what it wrote before.
+enum HighlightWhiteStore {
+    static let range = 0.0...1.0
+    static let step = 0.05
+    private static let key = "lgHighlightWhiteValue"
+
+    static var value: Double {
+        get {
+            guard UserDefaults.standard.object(forKey: key) != nil else { return 1.0 }
+            return range.clamp(UserDefaults.standard.double(forKey: key))
+        }
+        set { UserDefaults.standard.set(range.clamp(newValue), forKey: key) }
+    }
+}
+
+private extension ClosedRange where Bound == Double {
+    func clamp(_ v: Double) -> Double { Swift.min(Swift.max(v, lowerBound), upperBound) }
+}
+
 private extension ClosedRange where Bound == Int {
     func clamp(_ v: Int) -> Int { Swift.min(Swift.max(v, lowerBound), upperBound) }
 }

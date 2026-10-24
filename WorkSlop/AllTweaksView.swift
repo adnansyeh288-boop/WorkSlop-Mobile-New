@@ -92,6 +92,14 @@ struct TweakListView: View {
     /// the same reason as the corner radius above — the store is
     /// UserDefaults, which nothing observes.
     @State private var footnoteShown = FootnoteStore.text
+    /// The saved white-point value, refreshed on appear for the same
+    /// reason as the two stores above.
+    @State private var highlightWhiteShown = HighlightWhiteStore.value
+    /// The PosterBoard apply mode, mirrored from
+    /// `PosterBoardApplyModeSettings` (UserDefaults, unobserved like
+    /// the stores above) so the picker on the PosterBoard page shows
+    /// the stored value and writes changes straight back.
+    @State private var posterBoardMode: PosterBoardApplyMode = PosterBoardApplyModeSettings.current
 
     var body: some View {
         ZStack {
@@ -149,6 +157,24 @@ struct TweakListView: View {
                                 }
                             }
                             .accessibilityIdentifier("nav-lock-screen-footnote")
+                        } else if feature.id == "lg-highlight-white" {
+                            // The white point is a number (0.0–1.0),
+                            // so its row opens the number page instead
+                            // of a plain toggle — same shape as the
+                            // corner-radius row above. As a toggle it
+                            // could only ever write the default 1.0.
+                            NavigationLink {
+                                HighlightWhiteView()
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(feature.title)
+                                    Text("SolariumHighlightWhite = \(String(format: "%.2f", highlightWhiteShown)) (tap to set the number)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .accessibilityIdentifier("nav-highlight-white")
                         } else {
                             FeatureToggleRow(feature: feature)
                         }
@@ -168,6 +194,33 @@ struct TweakListView: View {
                 } footer: {
                     if let footer = group.footer { Text(footer) }
                 }
+                if group.id == "PosterBoard" {
+                    // The apply mode is the user's choice — the two
+                    // mechanisms install the same wallpapers different
+                    // ways, and only "Protective backup" can reset the
+                    // store. Until this picker existed the setting had
+                    // no UI at all, so the default (AirLift) silently
+                    // made every reset fail.
+                    Section {
+                        Picker("Apply mode", selection: $posterBoardMode) {
+                            ForEach(PosterBoardApplyMode.allCases) { mode in
+                                Label(mode.title, systemImage: mode.symbol)
+                                    .tag(mode)
+                            }
+                        }
+                        .accessibilityIdentifier("posterboard-apply-mode-picker")
+                        .onChange(of: posterBoardMode) { _, newValue in
+                            PosterBoardApplyModeSettings.current = newValue
+                        }
+                    } header: {
+                        Text("Apply mode")
+                    } footer: {
+                        Text(posterBoardMode.summary
+                             + (posterBoardMode.supportsReset
+                                ? " This is the mode that can reset the PosterBoard store."
+                                : " A reset needs the \"Protective backup\" mode."))
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .modifier(ShellListInsets(enabled: embedded))
@@ -178,6 +231,8 @@ struct TweakListView: View {
         .onAppear {
             cornerRadiusShown = CornerRadiusStore.value
             footnoteShown = FootnoteStore.text
+            highlightWhiteShown = HighlightWhiteStore.value
+            posterBoardMode = PosterBoardApplyModeSettings.current
         }
     }
 }
