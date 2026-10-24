@@ -5,6 +5,14 @@ import SwiftUI
 /// was removed and the app pins AppleLanguages to English at launch
 /// (see WorkSlopApp). Localizable.xcstrings is left untouched.
 struct SettingsView: View {
+    /// Development-mode bindings, over the same `UserDefaults` keys the
+    /// backend reads (`DevSettings`) — spelled once, there, so the page and
+    /// the gate cannot disagree about which switch is which.
+    @AppStorage(DevSettings.Key.enabled) private var devEnabled = false
+    @AppStorage(DevSettings.Key.fprDiscriminatorTest) private var fprTestArmed = false
+    @State private var fprRunning = false
+    @State private var fprResult = ""
+
     var body: some View {
         ZStack {
             SkyBackground()
@@ -49,10 +57,43 @@ struct SettingsView: View {
             } header: {
                 Text("License")
             }
+
+            Section {
+                Toggle("Development Mode", isOn: $devEnabled)
+                if devEnabled {
+                    Toggle("FPR Discriminator Test", isOn: $fprTestArmed)
+                    Button("FPR Discriminator Test (iOS 27)") { runFPRTest() }
+                        .disabled(!fprTestArmed || fprRunning)
+                    if !fprResult.isEmpty {
+                        Text(fprResult)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Development only. Restores ONE harmless marker file (ManagedPreferencesDomain/Library/Preferences/com.workslop.fprtest.plist) from a backup manifest synthesised on this device — no protective backup is pulled first. That is the experiment: whether an iOS 27 device accepts a synthesised sqlite partial manifest at all. Every stage is written to the log under [FPR-TEST].")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Development")
+            }
             }
             .scrollContentBackground(.hidden)
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// Start the discriminator test. The run itself reports into the app log
+    /// under `[FPR-TEST]`; the line kept here is only its one-sentence
+    /// outcome, so the page says what happened without pretending to be the
+    /// evidence.
+    private func runFPRTest() {
+        fprRunning = true
+        fprResult = "Running — progress is in the log."
+        Task {
+            let outcome = await FPRDiscriminatorTest.run()
+            fprResult = outcome
+            fprRunning = false
+        }
     }
 }

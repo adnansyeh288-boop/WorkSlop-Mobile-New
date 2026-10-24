@@ -28,10 +28,12 @@ enum DevSettings {
         static let forcePartialRestore = "Dev.ForcePartialRestore"
         static let verboseLog = "Dev.VerboseLog"
         static let skipAfcMedia = "Dev.SkipAfcMedia"
+        static let fprDiscriminatorTest = "Dev.FPRDiscriminatorTest"
     }
 
     /// The `UserDefaults` keys in declaration order, for the reset action.
-    static let allKeys = [Key.forcePartialRestore, Key.verboseLog, Key.skipAfcMedia]
+    static let allKeys = [Key.forcePartialRestore, Key.verboseLog, Key.skipAfcMedia,
+                          Key.fprDiscriminatorTest]
 
     private static var defaults: UserDefaults { .standard }
 
@@ -80,6 +82,18 @@ enum DevSettings {
         set { defaults.set(newValue, forKey: Key.skipAfcMedia) }
     }
 
+    /// Arm the FPR discriminator test (`FPRDiscriminatorTest`).
+    ///
+    /// Unlike the switches above this one changes nothing about a normal run:
+    /// it only unlocks the test's button on this same page. The test itself is
+    /// a separate, explicit tap, and the switch exists so the button cannot be
+    /// live by accident — a restore, even a one-file one, is not something a
+    /// settings page should be able to start with a stray touch.
+    static var fprDiscriminatorTest: Bool {
+        get { defaults.bool(forKey: Key.fprDiscriminatorTest) }
+        set { defaults.set(newValue, forKey: Key.fprDiscriminatorTest) }
+    }
+
     // MARK: - What a run obeys
 
     /// The resolved settings for one run. This is the only thing the engine is
@@ -88,6 +102,7 @@ enum DevSettings {
         var forcePartialRestore = false
         var verboseLog = true
         var skipAfcMedia = false
+        var fprDiscriminatorTest = false
     }
 
     static var effective: Effective {
@@ -95,7 +110,8 @@ enum DevSettings {
                   // Logging is the one switch that is *restored* rather than gated:
                   // see `applyLoggingPreference`.
                   verboseLog: enabled ? verboseLog : true,
-                  skipAfcMedia: enabled && skipAfcMedia)
+                  skipAfcMedia: enabled && skipAfcMedia,
+                  fprDiscriminatorTest: enabled && fprDiscriminatorTest)
     }
 
     /// Push the logging switch into the vendor.

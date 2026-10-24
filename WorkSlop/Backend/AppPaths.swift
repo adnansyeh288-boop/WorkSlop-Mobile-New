@@ -50,6 +50,15 @@ enum AppPaths {
             .appendingPathComponent(udid, conformingTo: .data)
     }
 
+    /// `<Documents>/FPRDiscriminatorTest/` — the restore root of the FPR
+    /// discriminator test's synthesised backup (`FPRDiscriminatorTest`).
+    ///
+    /// Its own root rather than the working backup's, for the same reason as
+    /// the PosterBoard fetch root: the test wipes and rebuilds its tree on
+    /// every run, and that must never reach the real backup tree beside it.
+    static let fprDiscriminatorTestRoot = URL.documents
+        .appendingPathComponent("FPRDiscriminatorTest", conformingTo: .data)
+
     /// `<Documents>/PosterBoardFetch/` — the scratch root of a PosterBoard
     /// database fetch.
     ///
