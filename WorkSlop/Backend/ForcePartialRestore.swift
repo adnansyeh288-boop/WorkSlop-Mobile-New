@@ -122,12 +122,13 @@ enum FPRDomainWhitelist {
 
     /// Exact domains from staged-payload sources outside `TweakDomainMap`:
     static let exactDomains: Set<String> = [
-        // PosterBoard.compile / PosterBoardSnapshot — every PosterBoard
-        // payload (descriptor files, the store database, reset zeroing)
-        // lands in PosterBoard.domain. In an FPR run only the reset-only
-        // selection reaches synthesis (a non-reset backup-mode selection
-        // is refused before synthesis; AirLift mode produces no
-        // payloads), but the domain is the feature's, so it is listed.
+        // No staged PosterBoard selection reaches FPR synthesis —
+        // `applyTweaksFPR` throws for any active PosterBoard selection
+        // (`GoldenNuggetEngine.swift:559`) and general Apply builds no
+        // PosterBoard selection. This entry is retained as an
+        // unreachable allowance for the shared whitelist; imported
+        // package rows do not consult it (`FPRImport.merge` filters
+        // banned domains only).
         "AppDomain-com.apple.PosterBoard",
     ]
 

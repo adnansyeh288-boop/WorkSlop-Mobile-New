@@ -405,6 +405,16 @@ struct ApplyView: View {
             || statusBarSelection.isActive
     }
 
+    /// True when the only staged content is PosterBoard, which general
+    /// Apply never delivers (it has its own Apply on the PosterBoard
+    /// page). Display only; the run path reports the same pointer in
+    /// the log when a PB-only staged set reaches `beginApplyRun`.
+    private var isPosterBoardOnlyStaged: Bool {
+        !selection.staged.isEmpty
+            && selection.staged.allSatisfy { $0 == "pb-tendies" || $0 == "pb-reset" }
+            && iconStage.staged.isEmpty && !statusBarSelection.isActive
+    }
+
     /// Product rule (user, 2026-10-24): on iOS 27 the status bar may
     /// only be applied through Force Partial Restore — the Normal
     /// method must not run it. True exactly when this selection would
@@ -457,6 +467,9 @@ struct ApplyView: View {
         case .forcePartialRestoreImport where selectedPackage == nil:
             return "No backup package yet — run Get Backup File first, then choose the package above."
         case .normal, .forcePartialRestore, .forcePartialRestoreImport:
+            if isPosterBoardOnlyStaged {
+                return "Stage tweaks first — or use the PosterBoard page's own Apply for PosterBoard."
+            }
             return "Stage tweaks first — pick tweaks, icon themes, or status bar overrides on Home, then come back here."
         }
     }
@@ -745,8 +758,16 @@ struct ApplyView: View {
         for skip in input.tendieLimitSkips {
             logLines.append("[WorkSlop] Skipped .tendies file: \(skip)")
         }
-        if !input.droppedFeatureIDs.isEmpty {
-            logLines.append("[WorkSlop] Not delivered (no longer offered): \(input.droppedFeatureIDs.joined(separator: ", "))")
+        // PosterBoard is still offered — on its own page — it just
+        // never rides general Apply, so it gets its own dropped line
+        // instead of the generic "no longer offered" wording.
+        let droppedPB = input.droppedFeatureIDs.filter { $0 == "pb-tendies" || $0 == "pb-reset" }
+        if !droppedPB.isEmpty {
+            logLines.append("[WorkSlop] PosterBoard is not delivered by general Apply — use the PosterBoard page's own Apply (\(droppedPB.joined(separator: ", "))).")
+        }
+        let droppedOther = input.droppedFeatureIDs.filter { $0 != "pb-tendies" && $0 != "pb-reset" }
+        if !droppedOther.isEmpty {
+            logLines.append("[WorkSlop] Not delivered (no longer offered): \(droppedOther.joined(separator: ", "))")
         }
         if !iconBuild.payloads.isEmpty {
             logLines.append("[WorkSlop] Icon themes: \(iconBuild.payloads.count / 2) web clip(s) ride this apply.")

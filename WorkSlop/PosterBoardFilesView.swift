@@ -261,7 +261,18 @@ struct PosterBoardActionsView: View {
         var notes: [String] = []
         for name in build.tendieFailures { notes.append("Skipped unreadable .tendies file: \(name)") }
         for skip in build.tendieLimitSkips { notes.append("Skipped .tendies file: \(skip)") }
-        startRun(build.selection, successNote: "PosterBoard applied — reboot the device so the store picks the new wallpapers up.",
+        // Reset takes precedence in `PosterBoard.compile` (reset modes
+        // return before tendies are compiled), so a combined staged
+        // selection delivers the reset only — say so up front rather
+        // than letting the success note imply new wallpapers landed.
+        let hasReset = !build.selection.resetModes.isEmpty
+        if hasReset && !build.selection.tendies.isEmpty {
+            notes.insert("Reset takes precedence: the tendies in this run are not delivered — run Apply again with Reset unstaged to deliver them.", at: 0)
+        }
+        let successNote = hasReset
+            ? "PosterBoard areas cleared — reboot the device, then PosterBoard rebuilds from what remains."
+            : "PosterBoard applied — reboot the device so the store picks the new wallpapers up."
+        startRun(build.selection, successNote: successNote,
                  notes: notes)
     }
 
