@@ -58,6 +58,7 @@ struct ApplyView: View {
     /// FPR + Import picker.
     @State private var backupPackages: [URL] = []
     @State private var selectedPackage: URL?
+    @State private var showDeletePackageConfirmation = false
 
     private enum ApplyResult {
         case succeeded
@@ -110,6 +111,18 @@ struct ApplyView: View {
                             }
                         }
                         .accessibilityIdentifier("backup-package-picker")
+                        if selectedPackage != nil {
+                            Button("Delete selected package", role: .destructive) {
+                                showDeletePackageConfirmation = true
+                            }
+                            .accessibilityIdentifier("delete-backup-package")
+                            .confirmationDialog("Delete this backup package?", isPresented: $showDeletePackageConfirmation, titleVisibility: .visible) {
+                                Button("Delete package", role: .destructive) { deleteSelectedPackage() }
+                                Button("Cancel", role: .cancel) { }
+                            } message: {
+                                Text("The package is deleted from WorkSlop's storage on this phone. This cannot be undone.")
+                            }
+                        }
                     }
                 } header: {
                     Text("Backup package")
@@ -260,6 +273,12 @@ struct ApplyView: View {
                 .disabled(!canStart || running)
                 .accessibilityIdentifier("apply-now")
 
+                if let blockerText {
+                    Text(blockerText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 if running {
                     Button(cancelling ? "Cancelling…" : "Cancel", role: .destructive) {
                         cancelApply()
@@ -374,6 +393,30 @@ struct ApplyView: View {
         }
     }
 
+    /// Why the run button is disabled, in plain terms, shown under
+    /// the button so a first-time user is never left guessing.
+    /// Mirrors `canStart` exactly — display only.
+    private var blockerText: String? {
+        guard !canStart, !running else { return nil }
+        if !status.unlocked {
+            if !status.pairingImported {
+                return "Import a pairing file first — the pairing controls are on Home."
+            }
+            return "Connect the VPN tunnel first — the tunnel status is on Home."
+        }
+        if method.requiresIOS27, let major = detectedMajor, major != 27 {
+            return "This method needs iOS 27 — this device reports iOS \(detectedVersion)."
+        }
+        switch method {
+        case .getBackupFile:
+            return nil
+        case .forcePartialRestoreImport where selectedPackage == nil:
+            return "No backup package yet — run Get Backup File first, then choose the package above."
+        case .normal, .forcePartialRestore, .forcePartialRestoreImport:
+            return "Stage tweaks first — pick tweaks, icon themes, or status bar overrides on Home, then come back here."
+        }
+    }
+
     private var runButtonTitle: String {
         if running {
             return method == .getBackupFile ? "Getting backup…" : "Applying…"
@@ -453,6 +496,17 @@ struct ApplyView: View {
         backupPackages = packages
         if let current = selectedPackage, packages.contains(current) { return }
         selectedPackage = packages.first
+    }
+
+    /// Delete the selected backup package from WorkSlop's storage
+    /// (the Get Backup File warning promises the package stays
+    /// "until you delete it" — this is that delete). View-level
+    /// file removal only; the list refreshes afterwards.
+    private func deleteSelectedPackage() {
+        guard let package = selectedPackage else { return }
+        try? FileManager.default.removeItem(at: package)
+        if selectedPackage == package { selectedPackage = nil }
+        refreshBackupPackages()
     }
 
     /// Re-read the device version through lockdown — the same

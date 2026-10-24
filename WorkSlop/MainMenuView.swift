@@ -493,17 +493,7 @@ struct MainMenuView: View {
                 .padding(.vertical, 14)
         }
         .buttonStyle(.borderedProminent)
-        .disabled(!canApply)
         .accessibilityIdentifier("apply-button")
-    }
-
-    private var canApply: Bool {
-        var statusBar = StatusBarSelection()
-        if let stored = StatusBarPreferences.storedSelection() {
-            statusBar.restore(from: stored)
-        }
-        return status.unlocked && (!selection.staged.isEmpty
-            || !iconStage.staged.isEmpty || statusBar.isActive)
     }
 
     private var applyLabel: String {
