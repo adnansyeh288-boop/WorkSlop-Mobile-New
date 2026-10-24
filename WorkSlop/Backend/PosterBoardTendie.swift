@@ -376,4 +376,10 @@ enum PosterBoardImports {
 
     /// The reference's cap (`PosterboardTweak.verify_tendie`).
     static let descriptorLimit = 10
+
+    /// The file-count half of the same advertised cap: one restore
+    /// carries at most 5 .tendies files (the pb-tendies subtitle has
+    /// always promised "max 5 files per restore, 10 descriptors").
+    /// Enforced in `GNSelectionBuilder` at staging time.
+    static let fileLimit = 5
 }

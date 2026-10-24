@@ -31,7 +31,7 @@ struct PosterBoardFilesView: View {
             } header: {
                 Text("PosterBoard (.tendies)")
             } footer: {
-                Text("Imported files ride the next apply when the Tendies toggle is staged.")
+                Text("Imported files ride the next apply when the Tendies toggle is staged. One apply carries at most 5 files and 10 descriptors in total — files past the limit stay here for a later apply and are named in the apply log.")
             }
 
             if let note {

@@ -214,6 +214,7 @@ enum GNMapping {
         switch feature.id {
         case "pb-tendies":
             lines.append("Delivered by the engine's PosterBoard stage, from the .tendies files in PosterBoard Files.")
+            lines.append("Delivery follows the apply mode picked on the PosterBoard page: AirLift needs iOS 26.2 or newer; the protective-backup mode works on every supported iOS.")
         case "pb-reset":
             lines.append("Clears the Collections, Suggested Photos and gallery-cache descriptor folders; PosterBoard rebuilds them on next use.")
         case "dm-recommended":
@@ -247,6 +248,10 @@ struct GNApplyInput {
     /// can still hold one — it is reported, never silently dropped.
     var droppedFeatureIDs: [String] = []
     var tendieFailures: [String] = []
+    /// .tendies files left behind by the advertised caps (5 files,
+    /// 10 descriptors per apply), each with the reason, so the apply
+    /// log can name them instead of the files vanishing from the run.
+    var tendieLimitSkips: [String] = []
 }
 
 enum GNSelectionBuilder {
@@ -256,12 +261,33 @@ enum GNSelectionBuilder {
             switch id {
             case "pb-tendies":
                 var tendies: [PosterBoardTendie] = []
+                var descriptorTotal = 0
                 for url in TendiesStore.urls(kind: "Tendies") {
+                    let parsed: PosterBoardTendie
                     do {
-                        tendies.append(try PosterBoardTendie(url: url))
+                        parsed = try PosterBoardTendie(url: url)
                     } catch {
                         input.tendieFailures.append(url.lastPathComponent)
+                        continue
                     }
+                    // The advertised caps, enforced here at staging:
+                    // at most `fileLimit` files and `descriptorLimit`
+                    // descriptors ride one apply. Files past a cap
+                    // stay in the store for a later apply and are
+                    // named in `tendieLimitSkips`, never dropped
+                    // silently (the constants had no caller before).
+                    if tendies.count >= PosterBoardImports.fileLimit {
+                        input.tendieLimitSkips.append(
+                            "\(parsed.name) — over the \(PosterBoardImports.fileLimit)-file limit for one apply")
+                        continue
+                    }
+                    if descriptorTotal + parsed.descriptorCount > PosterBoardImports.descriptorLimit {
+                        input.tendieLimitSkips.append(
+                            "\(parsed.name) — would take this apply past \(PosterBoardImports.descriptorLimit) descriptors")
+                        continue
+                    }
+                    descriptorTotal += parsed.descriptorCount
+                    tendies.append(parsed)
                 }
                 input.posterBoard.tendies = tendies
                 input.mappedFeatures += 1
@@ -297,6 +323,20 @@ enum GNSelectionBuilder {
                         input.selection.restore(
                             enabled: true,
                             value: .string(FootnoteStore.text),
+                            multiValues: nil,
+                            for: spec)
+                    }
+                    // The highlight spec is a single-key NUMBER spec
+                    // (0.0–1.0): override its registry default with
+                    // the value the user set in the editor
+                    // (HighlightWhiteStore), like the footnote above.
+                    // Without this the staged toggle could only ever
+                    // write the default 1.0.
+                    if id == "lg-highlight-white",
+                       let spec = specs.first(where: { $0.id == "SolariumHighlightWhite" }) {
+                        input.selection.restore(
+                            enabled: true,
+                            value: .double(HighlightWhiteStore.value),
                             multiValues: nil,
                             for: spec)
                     }
