@@ -35,6 +35,20 @@ enum AppPaths {
         URL.documents.appendingPathComponent(udid, conformingTo: .data)
     }
 
+    /// `<Documents>/FPR/<udid>/` — the restore root of a Force Partial
+    /// Restore run's host-synthesised backup (`ForcePartialRestore`).
+    ///
+    /// Shaped like `fullBackupRoot` — a root named for the device, with the
+    /// device directory nested under it by `deviceDir(backupRoot:udid:)` —
+    /// but under its own `FPR/` parent: an FPR run wipes and rebuilds its
+    /// tree on every run, and that must never reach the protective backup
+    /// tree beside it (the same reason the PosterBoard fetch root and the
+    /// discriminator test's root are their own).
+    static func fprRoot(udid: String) -> URL {
+        URL.documents.appendingPathComponent("FPR", conformingTo: .data)
+            .appendingPathComponent(udid, conformingTo: .data)
+    }
+
     /// `<Documents>/Baseline/<udid>/` — the retained pull the next run diffs
     /// against.
     ///
