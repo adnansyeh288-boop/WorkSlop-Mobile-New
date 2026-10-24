@@ -374,8 +374,18 @@ struct ApplyView: View {
             || statusBarSelection.isActive
     }
 
+    /// Product rule (user, 2026-10-24): on iOS 27 the status bar may
+    /// only be applied through Force Partial Restore — the Normal
+    /// method must not run it. True exactly when this selection would
+    /// do that. An unread version does not block here (no speculation):
+    /// the engine's run-layer gate decides on the resolved version.
+    private var statusBarBlockedOnNormal27: Bool {
+        method == .normal && detectedMajor == 27 && statusBarSelection.isActive
+    }
+
     private var canStart: Bool {
         guard status.unlocked else { return false }
+        if statusBarBlockedOnNormal27 { return false }
         // The picker already disables the FPR pair off iOS 27;
         // this is the same gate at the button, for a method stored
         // before the version was read (or on another iOS).
@@ -403,6 +413,9 @@ struct ApplyView: View {
                 return "Import a pairing file first — the pairing controls are on Home."
             }
             return "Connect the VPN tunnel first — the tunnel status is on Home."
+        }
+        if statusBarBlockedOnNormal27 {
+            return "Status Bar tweaks on iOS 27 can only be applied with Force Partial Restore — switch the method above to Force Partial Restore."
         }
         if method.requiresIOS27, let major = detectedMajor, major != 27 {
             return "This method needs iOS 27 — this device reports iOS \(detectedVersion)."
@@ -642,6 +655,9 @@ struct ApplyView: View {
         for name in input.tendieFailures {
             logLines.append("[WorkSlop] Skipped unreadable .tendies file: \(name)")
         }
+        for skip in input.tendieLimitSkips {
+            logLines.append("[WorkSlop] Skipped .tendies file: \(skip)")
+        }
         if !input.droppedFeatureIDs.isEmpty {
             logLines.append("[WorkSlop] Not delivered (no longer offered): \(input.droppedFeatureIDs.joined(separator: ", "))")
         }
@@ -710,12 +726,16 @@ struct ApplyView: View {
                     finishRun()
                     // Record what this run put on the device — the
                     // data Remove Tweaks works from. Dropped features
-                    // and the PosterBoard reset action are not tweaks
-                    // left on the device, so they are not recorded.
+                    // and the PosterBoard items are not tweaks left on
+                    // the device for Remove Tweaks: the reset action
+                    // removes rather than installs, and tendies
+                    // wallpapers are managed on the PosterBoard page
+                    // (its files list and its reset). Recording either
+                    // one left an entry no removal could ever clear.
                     AppliedTweaksStore.recordApply(
                         featureIDs: Array(selection.staged
                             .subtracting(input.droppedFeatureIDs)
-                            .subtracting(["pb-reset"])),
+                            .subtracting(["pb-reset", "pb-tendies"])),
                         statusBarActive: statusBar.isActive,
                         iconBundleIDs: iconStage.staged.map(\.bundleID),
                         pairingFingerprint: PairingStore.fingerprint)
