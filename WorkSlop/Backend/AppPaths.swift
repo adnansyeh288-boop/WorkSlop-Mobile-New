@@ -49,6 +49,17 @@ enum AppPaths {
             .appendingPathComponent(udid, conformingTo: .data)
     }
 
+    /// `<Documents>/ExportedBackups/` — the Option-4 backup packages
+    /// (`BackupExportStore` / `GoldenNuggetEngine.getBackupFile`).
+    ///
+    /// Its own root rather than the working backup tree's: a package is a
+    /// user-kept artifact that must survive the per-run wipes of
+    /// `<Documents>/<udid>/` and `FPR/`, and it is the picker source for
+    /// Option 3's import. In-flight pulls stage in a dot-prefixed directory
+    /// under this same root and are moved into place only when complete.
+    static let exportedBackups = URL.documents
+        .appendingPathComponent("ExportedBackups", conformingTo: .data)
+
     /// `<Documents>/Baseline/<udid>/` — the retained pull the next run diffs
     /// against.
     ///
