@@ -147,6 +147,7 @@ struct PasscodeThemeView: View {
                             creatorKeys = PasscodeTheme.slicePoster(
                                 image: posterImage, zoom: sliceZoom,
                                 maskToCircles: sliceMode == .circles)
+                            loadedName = nil
                             note = "Sliced poster into \(creatorKeys.count) key(s) (poster grid 915×1148)."
                             log.append("passcode: sliced poster (\(sliceMode.rawValue), zoom \(sliceZoom)) → \(creatorKeys.count) keys.")
                         }
@@ -300,6 +301,7 @@ struct PasscodeThemeView: View {
                    let tile = PasscodeTheme.cropToCircle(image: img) {
                     await MainActor.run {
                         creatorKeys[digit] = tile
+                        loadedName = nil
                         log.append("passcode: key \(digit) set from photo (circular crop).")
                     }
                 }

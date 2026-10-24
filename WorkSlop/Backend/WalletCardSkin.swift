@@ -53,7 +53,9 @@ enum WalletCardSkin {
         for ext in [".pkpass", ".cache", ".pkcache"] where s.hasSuffix(ext) {
             s = String(s.dropLast(ext.count))
         }
+        s = s.trimmingCharacters(in: CharacterSet(charactersIn: "'\",()<>;[]{}. "))
         guard s.count >= 20, s.count <= 80 else { return nil }
+        if s.count == 36 && s.filter({ $0 == "-" }).count == 4 { return nil }
         return s
     }
 

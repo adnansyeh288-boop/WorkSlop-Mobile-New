@@ -127,7 +127,7 @@ enum PasscodeTheme {
         static var detected: LanguageTarget {
             let lang = Locale.preferredLanguages.first ?? "en"
             let code = lang.split(separator: "-").first.map(String.init) ?? "en"
-            return LanguageTarget(rawValue: code) ?? .other
+            return LanguageTarget(rawValue: code) ?? .en
         }
     }
 

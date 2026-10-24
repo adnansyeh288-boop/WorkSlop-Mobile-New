@@ -195,6 +195,9 @@ struct WalletCardView: View {
             deviceVersion = await AirCardPageVersion.resolve()
             blockedReason = AirCardGate.blockedReason(deviceVersion: deviceVersion)
         }
+        .onDisappear {
+            stopScanning()
+        }
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
             Task {
@@ -227,6 +230,16 @@ struct WalletCardView: View {
         log.append("wallet: scan started — open Apple Pay and tap a card.")
         Task {
             do {
+                // Fresh gate (not the stale .task page state): re-resolve the
+                // version right before streaming, mirroring the flash gates.
+                let version = await AirCardPageVersion.resolve()
+                guard AirCardGate.blockedReason(deviceVersion: version) == nil else {
+                    await MainActor.run {
+                        scanning = false
+                        note = "AirCard is blocked on this iOS version."
+                    }
+                    return
+                }
                 let stop = try await Airlift.streamSyslog(
                     pairingPath: AppPaths.pairingFile.path
                 ) { line in
@@ -263,6 +276,9 @@ struct WalletCardView: View {
     }
 
     private func stopScanning() {
+        // Guard the log line: a non-scanning disappear (e.g. plain page exit)
+        // must not append a misleading "scan stopped" line.
+        guard scanning || stopScan != nil else { return }
         stopScan?()
         stopScan = nil
         scanning = false
