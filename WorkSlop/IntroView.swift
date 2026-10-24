@@ -25,7 +25,7 @@ struct IntroView: View {
                         "Liquid Glass: iOS 26.0 and later.",
                         "Status Bar classic options: iOS 26.x (iOS 27 keeps carrier text only).",
                         "iOS 26 and below: tweaks ride Partial restore (sparse restore, no wipe). iOS 27: Full backup \u{2192} modify \u{2192} restore with all data - the WorkSlop Desktop method.",
-                        "Devices below iOS 16.0 or above iOS 27 get an \"iOS version not supported\" notice instead of this app.",
+                        "Devices below iOS 26.0 or above iOS 27 get an \"iOS version not supported\" notice instead of this app.",
                     ])
                 .tag(1)
 
