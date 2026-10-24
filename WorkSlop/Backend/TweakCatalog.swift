@@ -2128,7 +2128,7 @@ enum TweakCatalog {
             minVersion: nil,
             maxVersion: nil,
             iphoneOnly: false,
-            ipadOnly: true,
+            ipadOnly: false,
             disabled: false,
             detail: "Removes the minimum watchOS pairing check in NanoRegistry so you can pair an Apple Watch running any watchOS version with your iPhone.",
             multiValues: [
