@@ -75,7 +75,7 @@ struct FPRTutorialView: View {
         let first = "First, the usual checks: Find My iPhone OFF, VPN tunnel running, pairing file imported."
         let second = "WorkSlop builds a small backup on this phone containing ONLY your staged tweaks. No backup of your data is taken first — that is what makes this fast, and why there is nothing to roll back to."
         let restore = "The phone restores that small backup. This should take minutes, not the long protective backup of the Normal Method."
-        let reboot = "Afterwards, reboot the phone so the tweaks take effect. Remove Tweaks still works afterwards — it covers the same locations."
+        let reboot = "Afterwards, reboot the phone so the tweaks take effect. Removal uses the Normal Method only: if you want to be able to remove these tweaks, make a backup with Get Backup File before you apply — applying with Force Partial Restore without a backup made before applying means those tweaks cannot be removed afterwards."
         if method == .forcePartialRestoreImport {
             return [
                 first,

@@ -933,10 +933,11 @@ class GoldenNuggetEngine {
         // Branch-integrity guard (2026-10-24): the fork below rests on the
         // one version read the caller resolved, and a reporter on iOS
         // 26.7.1 was wrongly sent down the iOS 27 protective path by a
-        // single wrong read. (Known gap, v4 audit item h: `resetPagesRun`
-        // and `removeAppliedTweaksRun` fork inline and never pass through
-        // here, so this guard does not cover page-reset / Remove Tweaks
-        // runs.) So the read is repeated here — through the
+        // single wrong read. (Known gap, v4 audit item h, partly
+        // closed in step 5: `resetPagesRun` still forks inline and
+        // never passes through here, so this guard does not cover
+        // page-reset runs; `removeAppliedTweaksRun` now carries its
+        // own copy of the guard, placed before its fork.) So the read is repeated here — through the
         // same path `resolvedDeviceVersion` uses, `DeviceIdentity.read()`
         // (lockdown ProductVersion) — immediately before the fork is
         // computed, and the two reads must agree on the major component
@@ -1202,6 +1203,29 @@ class GoldenNuggetEngine {
         let major = Int(version.split(separator: ".").first ?? "0") ?? 0
         let dev = DevSettings.effective
         let ios27 = major >= 27 && !dev.forcePartialRestore
+
+        // Branch-integrity guard, the same pattern `deliver()` uses:
+        // the fork below — and the `ios27:` plan that follows it
+        // (the status bar mechanism is archive on 27, classic on
+        // 26) — rests on the one version read just resolved, and a
+        // single wrong read in the dangerous direction (a 26 device
+        // read as 27) would send it down the sqlite protective path.
+        // Re-read through the same path (`DeviceIdentity.read()`)
+        // immediately before the fork, and stop the run before any
+        // backup or restore work when the two reads disagree on
+        // the major component — or when the re-read is unreadable.
+        let branchReread = await DeviceIdentity.read()
+        let branchRereadMajor = Int(branchReread.version.split(separator: ".").first ?? "0") ?? 0
+        let branchFork = ios27 ? "protective" : "partial"
+        log("[BRANCH] initial read: \(version) (major \(major)); "
+            + "pre-fork re-read: \(branchReread.version.isEmpty ? "unreadable" : branchReread.version) "
+            + "(major \(branchRereadMajor)); fork: \(branchFork)")
+        guard !branchReread.version.isEmpty, branchRereadMajor == major else {
+            throw GoldenNuggetError(
+                "Device version read changed during setup (was \(version), now "
+                + "\(branchReread.version.isEmpty ? "unreadable" : branchReread.version)) "
+                + "— run stopped before any backup or restore. Reconnect the tunnel and retry.")
+        }
 
         let plan = TweakReset.plan(locations: locations,
                                    includeStatusBar: includeStatusBar, ios27: ios27)
