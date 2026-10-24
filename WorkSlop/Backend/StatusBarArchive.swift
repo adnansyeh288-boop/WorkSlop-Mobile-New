@@ -41,8 +41,12 @@ import Foundation
 /// fixed values that were verified to deserialize and render. Exposing more
 /// without hardware verification would risk shipping a status bar that fails to
 /// draw at all, so the time/date/battery/wifi overrides and the 46 per-item
-/// toggles are **not** offered on iOS 27+. The page hides them, exactly as
-/// `src/gui/ios/statusbar.py` does.
+/// toggles cannot be carried on iOS 27+. The reference's page does not offer
+/// them there (`src/gui/ios/statusbar.py`); this port's page still shows them,
+/// so anything set that the archive cannot carry is reported through
+/// `droppedFields` and the apply log — and a selection carrying *only*
+/// uncarriable fields is refused rather than delivered as a reset
+/// (see `StatusBarMechanism.payload`).
 ///
 /// ## Failure mode is safe
 ///
@@ -250,20 +254,28 @@ enum StatusBarArchive {
     static func build(_ overrides: StatusBarOverrides) throws -> Data {
         let primary = truncate(overrides.carrierName.text, max: maxCarrierLength)
         let secondary = truncate(overrides.secondaryCarrierName.text, max: maxCarrierLength)
+        let primaryBadge = truncateBadge(overrides.serviceBadge.text)
+        let secondaryBadge = truncateBadge(overrides.secondaryServiceBadge.text)
 
+        // An entry exists when ANY of its three fields is set — not only the
+        // name. The classic struct gates badge and bars on their own flags, so
+        // a badge-only or bars-only selection is a real override there; gating
+        // the archive entry on the name alone dropped those two silently and,
+        // with nothing else set, turned the selection into a reset record.
+        // An entry with no `string` simply leaves the carrier name stock.
         var primaryEntry: StatusBarArchiveCellularEntry?
-        if let primary {
+        if primary != nil || primaryBadge != nil || overrides.signalBars.set {
             primaryEntry = StatusBarArchiveCellularEntry(
                 string: primary,
-                badge: truncateBadge(overrides.serviceBadge.text),
+                badge: primaryBadge,
                 displayValue: clampBars(overrides.signalBars.set
                                         ? overrides.signalBars.value : nil))
         }
         var secondaryEntry: StatusBarArchiveCellularEntry?
-        if let secondary {
+        if secondary != nil || secondaryBadge != nil || overrides.secondarySignalBars.set {
             secondaryEntry = StatusBarArchiveCellularEntry(
                 string: secondary,
-                badge: truncateBadge(overrides.secondaryServiceBadge.text),
+                badge: secondaryBadge,
                 displayValue: clampBars(overrides.secondarySignalBars.set
                                         ? overrides.secondarySignalBars.value : nil))
         }
@@ -472,6 +484,8 @@ enum StatusBarArchive {
         if overrides.batteryCapacity.set { dropped.append("battery capacity") }
         if overrides.wifiBars.set { dropped.append("wifi bars") }
         if overrides.rawSignalShown { dropped.append("raw signal") }
+        if overrides.rawWifiSignalShown { dropped.append("raw wifi signal") }
+        if overrides.sillyMode { dropped.append("silly mode") }
         if overrides.dataNetworkType.set { dropped.append("data network type") }
         if overrides.secondaryDataNetworkType.set { dropped.append("secondary data network type") }
         if overrides.cellularServiceShown.set { dropped.append("cellular service") }

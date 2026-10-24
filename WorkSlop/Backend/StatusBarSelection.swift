@@ -43,16 +43,35 @@ enum StatusBarMechanism: Equatable {
     /// The payload for these overrides under this mechanism.
     ///
     /// On iOS 27+ the archive carries only the carrier name, badge and bar count,
-    /// so anything else the user set is **not** delivered — the page hides those
-    /// controls, and this returns a note for the log rather than silently
-    /// pretending the whole struct went out.
+    /// so anything else the user set is **not** delivered — this returns the
+    /// dropped names for the log rather than silently pretending the whole
+    /// struct went out.
+    ///
+    /// One case is refused outright: a selection whose archive would be the
+    /// **reset** record (no cellular entries) while carrying fields the format
+    /// cannot hold. An enabled-but-empty selection is a deliberate reset and
+    /// still goes out; but a user who set only silly mode, raw wifi signal or
+    /// other uncarriable fields asked for overrides, not a reset — and the
+    /// empty archive would wipe the carrier overrides already on the device.
+    /// The refusal names the selection's full dropped list — every field it
+    /// set that the format cannot carry. Refusing, loudly, is the only honest
+    /// answer. (Removal never hits this: it builds from empty overrides,
+    /// whose dropped list is empty.)
     func payload(for overrides: StatusBarOverrides) throws -> (data: Data, dropped: [String]) {
         switch self {
         case .classic:
             return (overrides.serialiseClassic(), [])
         case .archive:
             let dropped = StatusBarArchive.droppedFields(overrides)
-            return (try StatusBarArchive.build(overrides), dropped)
+            let data = try StatusBarArchive.build(overrides)
+            if StatusBarArchive.isReset(data), !dropped.isEmpty {
+                throw GoldenNuggetError("Status Bar: on iOS 27 only the carrier name, "
+                    + "service badge and signal bars can be applied. This selection sets "
+                    + "only \(dropped.joined(separator: ", ")), which the iOS 27 format "
+                    + "cannot carry — and sending it would reset the status bar overrides "
+                    + "already on the device. Nothing was sent.")
+            }
+            return (data, dropped)
         }
     }
 }
@@ -86,7 +105,9 @@ struct StatusBarSelection {
 
     /// The reference's "silly mode": every status-bar item on regardless of what
     /// is set. It only affects the classic struct — the archive has no item
-    /// toggles at all — so it is not offered on iOS 27+.
+    /// toggles at all. The page still offers the toggle on iOS 27 (it does not
+    /// gate controls by version), so there the archive reports it through
+    /// `droppedFields` instead of honouring it.
     var sillyMode: Bool {
         get { overrides.sillyMode }
         set { overrides.sillyMode = newValue }
