@@ -67,7 +67,7 @@ struct UnsupportedIOSView: View {
                 Text("iOS version not supported")
                     .font(.title.weight(.bold))
                     .multilineTextAlignment(.center)
-                Text("This device is running iOS \(DeviceInfoEx.fullVersion). WorkSlop 2.0 supports iOS 26.0 through 27.x.")
+                Text("This device is running iOS \(DeviceInfoEx.fullVersion). WorkSlop 4.0 supports iOS 26.0 through 27.x.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

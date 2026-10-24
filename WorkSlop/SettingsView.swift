@@ -16,7 +16,7 @@ struct SettingsView: View {
             SkyBackground()
             List {
                 Section {
-                LabeledContent("Version", value: "3.0")
+                LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                 LabeledContent("This device's iOS", value: DeviceInfoEx.fullVersion)
                 LabeledContent("Build", value: DeviceInfoEx.buildNumber)
                 LabeledContent("Build support", value: BuildSupport.current.displayText)
