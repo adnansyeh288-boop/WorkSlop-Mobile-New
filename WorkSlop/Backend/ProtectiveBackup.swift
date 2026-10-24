@@ -20,9 +20,15 @@ enum ProtectiveBackup {
     ///   callers keep the default and get no syslog stream. (The catch
     ///   below handles any failure the purge/error evidence identifies as
     ///   a space failure, with or without the stream.)
+    /// - Parameter ios27: which host-manifest format to seed. The iOS 27
+    ///   apply path keeps the default; the v4 Get Backup File pull passes
+    ///   the device's resolved major version so an iOS 26 device is seeded
+    ///   with its own format (Status 2.4 / Manifest 9.1) instead of the
+    ///   iOS 27 one (3.3 / 10.0).
     static func run(
         backupRoot: URL,
         udid: String,
+        ios27: Bool = true,
         captureUploadSize: Bool = false,
         onProgress: ((Double) -> Void)? = nil
     ) async throws {
@@ -100,8 +106,8 @@ enum ProtectiveBackup {
                             + "(wiping it would force a full re-upload)")
                     }
                     let dir = AppPaths.deviceDir(backupRoot: backupRoot, udid: udid)
-                    try HostManifests.ensure(deviceDir: dir, udid: udid, isFullBackup: true)
-                    try HostManifests.writeSQLiteManifest(deviceDir: dir, ios27: true)
+                    try HostManifests.ensure(deviceDir: dir, udid: udid, ios27: ios27, isFullBackup: true)
+                    try HostManifests.writeSQLiteManifest(deviceDir: dir, ios27: ios27)
                     AppLog.write("host manifests ready: full backup, Manifest.db written "
                         + "(\((dir.appendingPathComponent("Manifest.db")).path))")
                 }

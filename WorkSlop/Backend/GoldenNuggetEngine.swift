@@ -709,18 +709,16 @@ class GoldenNuggetEngine {
     /// re-import through Force Partial Restore + Import Backup.
     ///
     /// No version gate: this works on iOS 26 and 27. `deviceVersion` (the
-    /// caller's read) is logged for the record and deliberately **not**
-    /// branched on — the pull is the existing `ProtectiveBackup.run`, the
-    /// device authors the backup in whatever format it writes, and no
-    /// second pull path is invented here for one family. One honest limit
-    /// of the code as it stands: `ProtectiveBackup.run`'s own host-side
-    /// seeding is the iOS 27 shape on every call today (its
-    /// `HostManifests.ensure` runs with the default `ios27: true` and it
-    /// writes the sqlite placeholder manifest unconditionally), and every
-    /// pre-existing caller of it sits on an iOS 27 branch — so what a
-    /// 26 device answers to that seed cannot be confirmed from this
-    /// codebase, whose iOS 26 paths never call `run()`. That is recorded
-    /// here rather than papered over with a fork this run cannot verify.
+    /// caller's read) is resolved through `resolvedDeviceVersion` — an
+    /// unreadable version stops the run (the refuse-to-guess rule every
+    /// format fork in this app follows) — but the resolved major only
+    /// chooses `ProtectiveBackup.run`'s host seed (`ios27:`), so a 26
+    /// device is seeded with its own Status 2.4 / Manifest 9.1 shape and
+    /// no sqlite placeholder, instead of the iOS 27 seed every
+    /// pre-existing caller of `run()` used. No second pull path is
+    /// invented here for one family. Still unproven until a beta tester
+    /// runs it: the pull machinery itself on a 26 device through this
+    /// code path (the codebase's own iOS 26 paths never call `run()`).
     ///
     /// What the package carries — precisely, from the pull's own filter
     /// (`ProtectiveBackup.isProtectiveFile`, the mid-stream `shouldPreserve`
@@ -769,9 +767,17 @@ class GoldenNuggetEngine {
 
         log("Get Backup File: pulling a device-authored backup package to keep "
             + "(reported device version: \(deviceVersion.isEmpty ? "not read by the caller" : deviceVersion) "
-            + "— logged, not gated on: this pull runs on iOS 26 and 27)")
+            + "— not gated on: this pull runs on iOS 26 and 27)")
 
         let udid = try await prepareRun()
+        // The host seed must match the device's own manifest format, so the
+        // version IS resolved (and an unreadable version stops the run, the
+        // same refuse-to-guess rule as every other format fork) — it only
+        // chooses the seed, it never gates whether the pull may run.
+        let version = try await resolvedDeviceVersion(deviceVersion)
+        let seedIOS27 = Int(version.split(separator: ".").first ?? "") ?? 0 >= 27
+        log("Get Backup File: seeding host manifests as \(seedIOS27 ? "iOS 27" : "iOS 26") format "
+            + "(device version \(version))")
 
         let root = BackupExportStore.root
         let fm = FileManager.default
@@ -783,7 +789,7 @@ class GoldenNuggetEngine {
                                                       conformingTo: .data)
         try fm.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
         do {
-            try await ProtectiveBackup.run(backupRoot: stagingRoot, udid: udid) { overall in
+            try await ProtectiveBackup.run(backupRoot: stagingRoot, udid: udid, ios27: seedIOS27) { overall in
                 self.logProgress("backup progress", overall)
             }
             log("Protective backup pull complete — packaging it for export.")
