@@ -31,8 +31,17 @@ enum AppliedTweaksStore {
 
     static func load() -> AppliedTweaksRecord {
         guard let data = try? Data(contentsOf: fileURL),
-              let record = try? JSONDecoder().decode(AppliedTweaksRecord.self, from: data)
+              var record = try? JSONDecoder().decode(AppliedTweaksRecord.self, from: data)
         else { return AppliedTweaksRecord() }
+        // Records written by earlier builds can hold PosterBoard ids
+        // (pb-tendies was recorded before it was excluded at record
+        // time). No removal path can ever clear them — Remove Tweaks
+        // groups by plist file and PosterBoard has none — so a record
+        // holding one read as "applied" forever and a tendies-only
+        // record made "Remove all" throw "Nothing to remove". They are
+        // not plist tweaks; drop them on read, and the next save
+        // writes the record back clean.
+        record.featureIDs.removeAll { GNMapping.isPosterBoard($0) }
         return record
     }
 
