@@ -5,6 +5,12 @@ import SwiftUI
 /// was removed and the app pins AppleLanguages to English at launch
 /// (see WorkSlopApp). Localizable.xcstrings is left untouched.
 struct SettingsView: View {
+    @State private var mediaStoreBytes: Int64 = 0
+    @State private var containerFree: Int64 = 0
+    @State private var showClearMediaConfirmation = false
+    @State private var lastFreedText: String?
+    @State private var clearErrorText: String?
+
     var body: some View {
         ZStack {
             SkyBackground()
@@ -49,10 +55,68 @@ struct SettingsView: View {
             } header: {
                 Text("License")
             }
+
+            Section {
+                LabeledContent("Media copies held by WorkSlop",
+                               value: formatBytes(mediaStoreBytes))
+                LabeledContent("Free space on this iPhone",
+                               value: formatBytes(containerFree))
+                Text("These are safety copies of photos and videos WorkSlop pulled during earlier applies. The originals stay on the phone — clearing only removes WorkSlop's copies, and frees space the iOS 27 backup check counts.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                if let lastFreedText {
+                    Text(lastFreedText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let clearErrorText {
+                    Text(clearErrorText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Button("Clear media copies", role: .destructive) {
+                    showClearMediaConfirmation = true
+                }
+                .disabled(mediaStoreBytes == 0)
+            } header: {
+                Text("Media store")
+            }
             }
             .scrollContentBackground(.hidden)
+            .onAppear { refreshMediaStore() }
+            .confirmationDialog("Clear media copies?",
+                                isPresented: $showClearMediaConfirmation,
+                                titleVisibility: .visible) {
+                Button("Clear media copies", role: .destructive) {
+                    performClearMediaStore()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes WorkSlop's safety copies of your photos and videos (\(formatBytes(mediaStoreBytes))). The originals on this iPhone are not touched.")
+            }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private func refreshMediaStore() {
+        mediaStoreBytes = FreeSpaceGuard.mediaStoreBytes()
+        containerFree = FreeSpaceGuard.containerFreeBytes()
+    }
+
+    private func performClearMediaStore() {
+        do {
+            let freed = try FreeSpaceGuard.clearMediaStore()
+            lastFreedText = "Freed \(formatBytes(freed)) of media copies."
+            clearErrorText = nil
+        } catch {
+            clearErrorText = "Could not clear the media copies: \(error.localizedDescription)"
+            lastFreedText = nil
+        }
+        refreshMediaStore()
     }
 }

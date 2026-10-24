@@ -467,6 +467,10 @@ private func mb2_get_free_disk_space(
         .volumeAvailableCapacityForImportantUsage
     let bytes = capacity.flatMap { $0 > 0 ? UInt64($0) : nil } ?? (UInt64(1) << 40)
     c.reportDiskSpaceOnce(bytes)
+    // [FREESPACE] Every answer, not just the first: after a purge request the
+    // device asks again, and the re-read value is the one the gate acted on.
+    c.reportEvent(String(format: "[FREESPACE] GetFreeDiskSpace answered %llu bytes (%.1f GB)",
+                         bytes, Double(bytes) / 1_073_741_824.0))
     return bytes
 }
 

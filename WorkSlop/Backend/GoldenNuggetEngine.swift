@@ -910,7 +910,7 @@ class GoldenNuggetEngine {
     private func protectiveBackup(udid: String) async throws -> URL {
         let backupRoot = AppPaths.fullBackupRoot(udid: udid)
         try resetDirectory(backupRoot)
-        try await ProtectiveBackup.run(backupRoot: backupRoot, udid: udid) { overall in
+        try await ProtectiveBackup.run(backupRoot: backupRoot, udid: udid, captureUploadSize: true) { overall in
             self.logProgress("backup progress", overall)
         }
         log("Protective backup complete.")

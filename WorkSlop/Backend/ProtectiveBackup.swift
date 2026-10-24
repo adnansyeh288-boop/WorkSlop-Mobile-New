@@ -13,12 +13,23 @@ import Minimuxer
 ///      the channel (BrokenPipe, no popup).
 enum ProtectiveBackup {
     /// Run one protective backup into `<backupRoot>/<udid>/`.
+    ///
+    /// - Parameter captureUploadSize: opt-in (the iOS 27 Normal apply path
+    ///   only). Streams the device syslog during the backup so the gate's
+    ///   `uploadSize:` line can be recorded by `FreeSpaceGuard`. Other
+    ///   callers keep the default and get no syslog stream. (The catch
+    ///   below handles any failure the purge/error evidence identifies as
+    ///   a space failure, with or without the stream.)
     static func run(
         backupRoot: URL,
         udid: String,
+        captureUploadSize: Bool = false,
         onProgress: ((Double) -> Void)? = nil
     ) async throws {
         let minimuxer = Minimuxer.shared()
+        // [FREESPACE] Byte offset into the Rust log for THIS run, so the
+        // failure path can count only this run's purge requests.
+        let rustMark = RustLog.size()
         AppLog.write("Creating protective backup (no photos/video) at \(backupRoot.path)…")
 
         // The Rust delegate callbacks are the ONLY host-side window into the
@@ -37,6 +48,30 @@ enum ProtectiveBackup {
         beat.start("protective backup") {
             trace.livenessLine() + ", " + WireCensus.healthLine()
         }
+
+        // [FREESPACE] Syslog capture: backupd writes the gate numbers
+        // (`uploadSize:<inclusive>(<exclusive>), uploadFileCount:<n>`) to the
+        // device syslog just before its free-space check. Airlift opens its
+        // own tunnel from the same pairing file the rest of the app uses
+        // (`AppPaths.pairingFile`). Capture is best-effort by design: if the
+        // stream cannot start, the backup proceeds exactly as before and no
+        // uploadSize is recorded — an absent number, never an invented one.
+        let uploadCapture = SyslogUploadSizeCapture()
+        var stopSyslog: (() -> Void)?
+        if captureUploadSize {
+            do {
+                stopSyslog = try await Airlift.streamSyslog(
+                    pairingPath: AppPaths.pairingFile.path
+                ) { line in
+                    uploadCapture.handle(line)
+                }
+                AppLog.write("[FREESPACE] syslog capture on — watching for the device's uploadSize line")
+            } catch {
+                AppLog.write("[FREESPACE] syslog capture unavailable "
+                    + "(\(error.localizedDescription)) — continuing without uploadSize capture")
+            }
+        }
+        defer { stopSyslog?() }
 
         do {
             // The device drops the mobilebackup2 channel as soon as the Trust /
@@ -186,8 +221,107 @@ enum ProtectiveBackup {
             AppLog.write("note: \"channel closed\" is jktcp's generic flow-closed report — it does not "
                 + "distinguish a device-side teardown from a local stack failure. See minimuxer.log "
                 + "(Rust, DEBUG) for the real step.")
-            throw error
+            // [FREESPACE] Failure-point handling for the device's free-space
+            // gate. There is NO mid-backup purge hook available to Swift: the
+            // vendored Rust crate answers DLMessagePurgeDiskSpace itself and
+            // the FFI delegate vtable has no purge callback, and the purge
+            // amount is not exposed by the vendored stack. What can be done
+            // honestly at this point is: record the real numbers, free the
+            // one pool of real space this app owns (its AFC media copies) so
+            // a retry starts with that space back, and hand the operator an
+            // error that keeps the original text and adds the space guidance.
+            // A non-space failure rethrows untouched, exactly as before.
+            let purgeCount = FreeSpaceGuard.purgeCountInRustLog(since: rustMark)
+            let errorText = (error as? GoldenNuggetError)?.message
+                ?? error.localizedDescription
+            let loweredError = errorText.lowercased()
+            let isSpaceFailure = purgeCount > 0
+                || loweredError.contains("105")
+                || loweredError.contains("insufficient free disk space")
+                || loweredError.contains("free disk space")
+            guard isSpaceFailure else { throw error }
+            FreeSpaceGuard.recordSpaceFailure(
+                reportedFree: AfcMediaBackup.containerFreeBytes(),
+                purgeCount: purgeCount,
+                finalError: errorText,
+                uploadSize: FreeSpaceGuard.lastKnownUploadSize())
+            let freed = (try? FreeSpaceGuard.clearMediaStore()) ?? 0
+            if freed > 0 {
+                FreeSpaceGuard.recordFreedByArm(freed)
+                AppLog.write("[FREESPACE] device demanded space (purge ×\(purgeCount)); freed "
+                    + "\(FreeSpaceGuard.formatBytes(freed)) of app-held media copies; free is now "
+                    + "\(FreeSpaceGuard.formatBytes(FreeSpaceGuard.containerFreeBytes()))")
+            } else {
+                AppLog.write("[FREESPACE] device demanded space (purge ×\(purgeCount)); "
+                    + "no app-held media copies to free")
+            }
+            var guidance = " The device stopped the backup over free space: it needs more "
+                + "free space than its computed backup size"
+            if let uploadSize = FreeSpaceGuard.lastKnownUploadSize() {
+                guidance += " (\(FreeSpaceGuard.formatBytes(uploadSize)))"
+            }
+            guidance += "."
+            if freed > 0 {
+                guidance += " WorkSlop freed \(FreeSpaceGuard.formatBytes(freed)) of media "
+                    + "copies it was holding — run Apply again."
+            } else {
+                guidance += " WorkSlop holds no media copies it can free — empty Recently "
+                    + "Deleted in Photos and Files, restart the iPhone, then run Apply again."
+            }
+            throw GoldenNuggetError(errorText + guidance)
         }
+    }
+
+    /// Parse a device syslog line carrying the free-space gate numbers:
+    /// `uploadSize:<inclusive>(<exclusive>), uploadFileCount:<n>`.
+    ///
+    /// The surrounding text varies between builds, so the scan anchors on
+    /// `uploadSize:` and reads the integer runs after it (and after
+    /// `uploadFileCount:` for the count). Returns nil unless both the
+    /// inclusive size and the file count were actually read — a partial
+    /// parse is no number at all.
+    static func parseUploadSizeLine(
+        _ line: String
+    ) -> (inclusive: Int64, exclusive: Int64, fileCount: Int)? {
+        guard let anchor = line.range(of: "uploadSize:") else { return nil }
+        let rest = line[anchor.upperBound...]
+        let head: Substring
+        var fileCount: Int?
+        if let label = rest.range(of: "uploadFileCount:") {
+            head = rest[..<label.lowerBound]
+            fileCount = firstIntegers(in: rest[label.upperBound...], limit: 1).first.map(Int.init)
+        } else {
+            head = rest
+        }
+        let sizes = firstIntegers(in: head, limit: 2)
+        guard let inclusive = sizes.first else { return nil }
+        if fileCount == nil {
+            // No label: the third integer run on the line is the count.
+            let all = firstIntegers(in: rest, limit: 3)
+            guard all.count == 3 else { return nil }
+            fileCount = Int(all[2])
+        }
+        guard let fileCount else { return nil }
+        return (inclusive: inclusive,
+                exclusive: sizes.count > 1 ? sizes[1] : 0,
+                fileCount: fileCount)
+    }
+
+    /// The first `limit` runs of ASCII digits in `text`, as integers.
+    private static func firstIntegers(in text: Substring, limit: Int) -> [Int64] {
+        var out: [Int64] = []
+        var current: Int64?
+        for character in text {
+            if let digit = character.wholeNumberValue, character.isASCII {
+                current = (current ?? 0) * 10 + Int64(digit)
+            } else if let value = current {
+                out.append(value)
+                current = nil
+                if out.count == limit { return out }
+            }
+        }
+        if let value = current, out.count < limit { out.append(value) }
+        return out
     }
 
     /// Count what is left in the device's staging tree after the commit step.
@@ -487,5 +621,31 @@ extension ProtectiveBackup {
     /// also the safe one, and matching the reference beats improving it.
     private static func startsWith(_ path: String, _ prefix: String) -> Bool {
         path.hasPrefix(prefix)
+    }
+}
+
+// MARK: - Syslog uploadSize capture
+
+/// First-successful-parse sink for `Airlift.streamSyslog` lines.
+///
+/// The syslog callback fires on FFI threads, so the "already captured" flag
+/// is lock-guarded; only the first line that parses is recorded and logged,
+/// so a gate line the device repeats cannot spam the record or the app log.
+private final class SyslogUploadSizeCapture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var captured = false
+
+    func handle(_ line: String) {
+        guard line.contains("uploadSize:"),
+              let parsed = ProtectiveBackup.parseUploadSizeLine(line) else { return }
+        lock.lock()
+        if captured { lock.unlock(); return }
+        captured = true
+        lock.unlock()
+        FreeSpaceGuard.recordUploadSize(inclusive: parsed.inclusive,
+                                        exclusive: parsed.exclusive,
+                                        fileCount: parsed.fileCount)
+        AppLog.write("[FREESPACE] device uploadSize: inclusive \(parsed.inclusive) "
+            + "(exclusive \(parsed.exclusive)), files \(parsed.fileCount)")
     }
 }
