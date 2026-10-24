@@ -490,7 +490,7 @@ struct ApplyView: View {
             return "Takes a protective backup on this phone first, then restores it with your tweaks. iOS only allows the backup when free space is larger than the backup's computed size — if it stops over space, free real space (empty Recently Deleted, restart) and try again."
         case .forcePartialRestore:
             return "No backup is taken first — WorkSlop builds a small backup containing only your staged tweaks and restores that. Fast, but there is nothing to roll back to. iOS 27 only."
-                + " If you apply with Force Partial Restore without making a backup first, you cannot remove these tweaks afterwards. To keep removal possible, run Get Backup File before you apply — removal uses the Normal Method, which takes a protective backup first."
+                + " If you apply with Force Partial Restore without making a backup first, you cannot remove these tweaks afterwards. To keep removal possible, run Get Backup File before you apply — removal uses the Normal Method only, which takes a protective backup first."
         case .forcePartialRestoreImport:
             return "No backup is taken first — WorkSlop builds a small backup containing only your staged tweaks and restores that. Fast, but there is nothing to roll back to. iOS 27 only."
                 + " A backup package you choose (made by Get Backup File) is merged in: data in the domains it carries replaces the data now on the phone in those domains."
