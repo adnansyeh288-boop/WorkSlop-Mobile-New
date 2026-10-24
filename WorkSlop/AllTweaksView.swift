@@ -188,6 +188,17 @@ struct TweakListView: View {
                 } footer: {
                     if let footer = group.footer { Text(footer) }
                 }
+                if group.id == "PosterBoard" {
+                    // PosterBoard's own Apply and Remove live here and on
+                    // the PosterBoard files page — never on general Apply.
+                    Section {
+                        PosterBoardActionsView()
+                    } header: {
+                        Text("PosterBoard Apply & Remove")
+                    } footer: {
+                        Text("PosterBoard runs through a protective backup and restore, on iOS 26 and 27. It never rides general Apply or Force Partial Restore.")
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .modifier(ShellListInsets(enabled: embedded))

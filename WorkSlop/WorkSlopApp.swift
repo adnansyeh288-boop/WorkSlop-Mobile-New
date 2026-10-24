@@ -10,6 +10,12 @@ struct WorkSlopApp: App {
         // picker is gone, so pin AppleLanguages to English at launch
         // (also clears any language a previous version had set).
         UserDefaults.standard.set(["en"], forKey: "AppleLanguages")
+        // PosterBoard fix (D8): the deleted apply-mode and AirLift
+        // container keys are orphans now — no code reads them any
+        // more. Clear them once (idempotent) so a stale stored mode
+        // can never be mistaken for a live setting.
+        UserDefaults.standard.removeObject(forKey: "PosterBoardApplyMode")
+        UserDefaults.standard.removeObject(forKey: "PosterBoardAirliftContainer")
         // Backend launch sequence (logging, AirLift sink, em_proxy),
         // then the Minimuxer start if a pairing record is in place.
         BackendBootstrap.appInit()
