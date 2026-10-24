@@ -70,17 +70,35 @@ struct ApplyView: View {
     var body: some View {
         List {
             Section {
-                Picker("Apply method", selection: $methodRaw) {
-                    ForEach(ApplyMethod.allCases) { candidate in
-                        Text(candidate.label)
-                            .tag(candidate.rawValue)
-                            .disabled(candidate.requiresIOS27 && fprDisabledByVersion)
+                // One card per method: the method is chosen by tapping
+                // its blue button, which writes the same persisted
+                // `methodRaw` the picker used to write. Selection state,
+                // preflight, gates and dispatch are untouched — only
+                // how the method is picked and displayed changes.
+                ForEach(ApplyMethod.allCases) { candidate in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(candidate.label)
+                                .font(.headline)
+                            Spacer()
+                            if candidate == method {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        Text(methodWarning(for: candidate))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Button(candidate == method ? "Selected" : "Select") {
+                            methodRaw = candidate.rawValue
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(candidate.requiresIOS27 && fprDisabledByVersion)
+                        .accessibilityIdentifier("apply-method-select-\(candidate.rawValue)")
                     }
+                    .padding()
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
                 }
-                .accessibilityIdentifier("apply-method-picker")
-                Text(methodWarning)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
                 if fprDisabledByVersion {
                     Text("Force Partial Restore needs iOS 27 — this device reports iOS \(detectedVersion).")
                         .font(.footnote)
@@ -386,7 +404,7 @@ struct ApplyView: View {
     private var canStart: Bool {
         guard status.unlocked else { return false }
         if statusBarBlockedOnNormal27 { return false }
-        // The picker already disables the FPR pair off iOS 27;
+        // The card button already disables the FPR pair off iOS 27;
         // this is the same gate at the button, for a method stored
         // before the version was read (or on another iOS).
         if method.requiresIOS27, let major = detectedMajor, major != 27 {
@@ -437,10 +455,11 @@ struct ApplyView: View {
         return method == .getBackupFile ? "Get Backup File" : "Apply now"
     }
 
-    /// The selected method's warning, shown under the picker.
-    /// Factual only — what the method does and what it costs.
-    private var methodWarning: String {
-        switch method {
+    /// Each card shows its own method's warning text, word for
+    /// word as the picker section did. Factual only — what the
+    /// method does and what it costs.
+    private func methodWarning(for candidate: ApplyMethod) -> String {
+        switch candidate {
         case .normal:
             return "Takes a protective backup on this phone first, then restores it with your tweaks. iOS only allows the backup when free space is larger than the backup's computed size — if it stops over space, free real space (empty Recently Deleted, restart) and try again."
         case .forcePartialRestore:
@@ -461,7 +480,7 @@ struct ApplyView: View {
     }
 
     /// True when the version is readable and is not iOS 27: the
-    /// FPR pair is disabled in the picker in that state. When the
+    /// FPR pair is disabled on its card in that state. When the
     /// version is not yet readable the options stay enabled — the
     /// engine refuses precisely if it still cannot read it at run
     /// time.
