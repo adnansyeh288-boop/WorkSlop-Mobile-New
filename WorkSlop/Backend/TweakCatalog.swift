@@ -71,7 +71,7 @@ enum TweakCatalog {
             maxValue: 999.0,
             step: 1.0,
             minVersion: "26.0",
-            maxVersion: "26.99",
+            maxVersion: nil,
             iphoneOnly: false,
             ipadOnly: false,
             disabled: false,
