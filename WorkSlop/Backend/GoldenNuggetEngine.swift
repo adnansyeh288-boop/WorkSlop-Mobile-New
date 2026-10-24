@@ -698,6 +698,140 @@ class GoldenNuggetEngine {
         }
     }
 
+    // MARK: - Run: Get Backup File (v4 Option 4)
+    //
+    // A standalone action, not an apply: pull the device-authored backup
+    // once, keep it as a package under `BackupExportStore.root`, and hand
+    // the package back. The package is what Option 3
+    // (`applyTweaksFPR(..., importPackage:)`) later merges from.
+
+    /// Pull a device-authored backup package the user can keep and
+    /// re-import through Force Partial Restore + Import Backup.
+    ///
+    /// No version gate: this works on iOS 26 and 27. `deviceVersion` (the
+    /// caller's read) is logged for the record and deliberately **not**
+    /// branched on — the pull is the existing `ProtectiveBackup.run`, the
+    /// device authors the backup in whatever format it writes, and no
+    /// second pull path is invented here for one family. One honest limit
+    /// of the code as it stands: `ProtectiveBackup.run`'s own host-side
+    /// seeding is the iOS 27 shape on every call today (its
+    /// `HostManifests.ensure` runs with the default `ios27: true` and it
+    /// writes the sqlite placeholder manifest unconditionally), and every
+    /// pre-existing caller of it sits on an iOS 27 branch — so what a
+    /// 26 device answers to that seed cannot be confirmed from this
+    /// codebase, whose iOS 26 paths never call `run()`. That is recorded
+    /// here rather than papered over with a fork this run cannot verify.
+    ///
+    /// What the package carries — precisely, from the pull's own filter
+    /// (`ProtectiveBackup.isProtectiveFile`, the mid-stream `shouldPreserve`
+    /// that decides which offered payloads are ever written to disk):
+    ///
+    ///   * the backup metadata files (`Info.plist`, `Manifest.plist`,
+    ///     `Manifest.db`, `Status.plist`) — with `Manifest.db` being the
+    ///     device's own uploaded database (it replaces the host's
+    ///     placeholder during the pull);
+    ///   * `SystemPreferencesDomain` and `MessagesDomain` whole (the iOS 27
+    ///     raw-tree message data, `Library/Messages` / `Library/SMS` /
+    ///     `Library/MessagesMetaData`, is the same set in tree form);
+    ///   * `HomeDomain` under the listed prefixes only: `Library/Accounts`,
+    ///     `Library/ConfigurationProfiles`, `Library/Preferences`,
+    ///     `Library/SpringBoard`, `Library/ControlCenter`,
+    ///     `Library/Shortcuts`, `Library/WebClips`, `Library/WebApp`,
+    ///     `Library/WebKit/WebsiteData`, `Library/AddressBook`.
+    ///
+    /// The package is the pull's raw product — **no prune runs on it** —
+    /// so its `Manifest.db` also *lists* rows the filter drained (their
+    /// payloads are missing or 0-byte placeholders; `CameraRollDomain` is
+    /// the standing example: the manifest-coordinate keep-set
+    /// `isProtectiveEntry`/`keepsRow` names it, while the mid-stream filter
+    /// never preserves a media payload, as `ProtectiveBackup`'s own comment
+    /// records). Listed is not carried, and telling the two apart is
+    /// `FPRImport.merge`'s placeholder rules' whole job.
+    ///
+    /// What it does **not** carry: photos, videos and app containers — the
+    /// filter drains them mid-stream — and the AFC media store, which is a
+    /// separate mechanism (`AfcMediaBackup`) and not part of the package.
+    ///
+    /// No presets bookkeeping: nothing was applied, so there is no rollback
+    /// record to prepare and no last-applied snapshot to save.
+    func getBackupFile(deviceVersion: String) async throws -> URL {
+        try await loggedRun("get backup file") {
+            try await getBackupFileRun(deviceVersion: deviceVersion)
+        }
+    }
+
+    private func getBackupFileRun(deviceVersion: String) async throws -> URL {
+        AppLog.shared.memory.reset()
+        clearCancel()
+        clearProgress()
+        let runStage = StageTimer("RUN get backup file")
+        defer { runStage.done() }
+
+        log("Get Backup File: pulling a device-authored backup package to keep "
+            + "(reported device version: \(deviceVersion.isEmpty ? "not read by the caller" : deviceVersion) "
+            + "— logged, not gated on: this pull runs on iOS 26 and 27)")
+
+        let udid = try await prepareRun()
+
+        let root = BackupExportStore.root
+        let fm = FileManager.default
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        // Stage under the export root (dot-prefixed, so `packageURLs` never
+        // lists it) and move the finished device directory into place: a
+        // failed or interrupted pull must leave no partial package behind.
+        let stagingRoot = root.appendingPathComponent(".staging-\(UUID().uuidString)",
+                                                      conformingTo: .data)
+        try fm.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+        do {
+            try await ProtectiveBackup.run(backupRoot: stagingRoot, udid: udid) { overall in
+                self.logProgress("backup progress", overall)
+            }
+            log("Protective backup pull complete — packaging it for export.")
+            clearProgress()
+
+            let pulledDir = AppPaths.deviceDir(backupRoot: stagingRoot, udid: udid)
+            guard fm.fileExists(atPath: pulledDir.appendingPathComponent("Manifest.db").path) else {
+                throw GoldenNuggetError(
+                    "The pull finished but left no Manifest.db in the backup it "
+                    + "produced, so there is no device-authored package to keep. "
+                    + "Nothing was exported.")
+            }
+
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "yyyyMMdd-HHmmss"
+            var packageName = "\(formatter.string(from: Date()))-\(String(udid.prefix(8)))"
+            var package = root.appendingPathComponent(packageName, conformingTo: .data)
+            var suffix = 2
+            while fm.fileExists(atPath: package.path) {
+                packageName = "\(formatter.string(from: Date()))-\(String(udid.prefix(8)))-\(suffix)"
+                package = root.appendingPathComponent(packageName, conformingTo: .data)
+                suffix += 1
+            }
+            try fm.moveItem(at: pulledDir, to: package)
+            try? fm.removeItem(at: stagingRoot)
+
+            let size = BackupExportStore.size(of: package)
+            let rows = ManifestStore(deviceDir: package).rowCount()
+            log("Backup package exported: \(package.path)")
+            log("package: \(ByteCountFormatter.string(fromByteCount: size, countStyle: .file)), "
+                + "\(rows) manifest row(s) — the device-authored protective set "
+                + "(SystemPreferencesDomain, MessagesDomain, and the HomeDomain "
+                + "preference/SpringBoard/accounts subtrees the backup filter "
+                + "preserves). Photos, videos and app containers are NOT in it: "
+                + "the filter drains them, and the AFC media store is a separate "
+                + "mechanism that is not part of the package. Status.plist / "
+                + "Manifest.plist / Info.plist are the ones the pull left in the "
+                + "device directory, and Manifest.db is the device's own.")
+            return package
+        } catch {
+            // Leave no partial package: the staging tree goes, the original
+            // error stands.
+            try? fm.removeItem(at: stagingRoot)
+            throw error
+        }
+    }
+
     /// Refuse a selection the AirLift path cannot carry, before anything is opened.
     ///
     /// A reset is a store operation and the video stage's frames are computed for
