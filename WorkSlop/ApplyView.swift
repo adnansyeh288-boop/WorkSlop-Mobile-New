@@ -59,6 +59,11 @@ struct ApplyView: View {
     @State private var backupPackages: [URL] = []
     @State private var selectedPackage: URL?
     @State private var showDeletePackageConfirmation = false
+    /// The zip a Get Backup File run just produced, waiting for the
+    /// user to pick where in Files to save it. The result is only set
+    /// when the picker answers (saved or cancelled) — never before.
+    @State private var exportZipURL: URL?
+    @State private var showExportPicker = false
 
     private enum ApplyResult {
         case succeeded
@@ -363,6 +368,14 @@ struct ApplyView: View {
                     showFPRTutorial = false
                 })
         }
+        .sheet(isPresented: $showExportPicker, onDismiss: { exportPickerDismissed() }) {
+            if let zipURL = exportZipURL {
+                DocumentExportPicker(
+                    url: zipURL,
+                    onExported: { exportPickerSaved(to: $0) },
+                    onCancelled: { exportPickerCancelled() })
+            }
+        }
         .onAppear {
             refreshFreeSpace()
             refreshBackupPackages()
@@ -468,7 +481,7 @@ struct ApplyView: View {
             return "No backup is taken first — WorkSlop builds a small backup containing only your staged tweaks and restores that. Fast, but there is nothing to roll back to. iOS 27 only."
                 + " A backup package you choose (made by Get Backup File) is merged in: data in the domains it carries replaces the data now on the phone in those domains."
         case .getBackupFile:
-            return "Copies a backup package onto this phone, for later use with Force Partial Restore + Import Backup. It changes nothing on the phone, but it needs free space while it runs and the package stays in WorkSlop's storage until you delete it."
+            return "Copies a backup package onto this phone, for later use with Force Partial Restore + Import Backup. It changes nothing on the phone, but it needs free space while it runs and the package stays in WorkSlop's storage until you delete it. After the pull, WorkSlop zips the package and offers it in Files, so you can keep a copy outside the app."
         }
     }
 
@@ -524,10 +537,43 @@ struct ApplyView: View {
     }
 
     private func refreshBackupPackages() {
+        BackupExportStore.removeStaleUnzipWorkingDirs()
         let packages = BackupExportStore.packageURLs()
         backupPackages = packages
         if let current = selectedPackage, packages.contains(current) { return }
         selectedPackage = packages.first
+    }
+
+    /// The Files picker saved the zip. Exporting copies — it does
+    /// not move — so the result is the zip still in WorkSlop's
+    /// storage, and the log line proves a copy left the app.
+    private func exportPickerSaved(to destination: URL) {
+        guard let zipURL = exportZipURL else { return }
+        exportZipURL = nil
+        showExportPicker = false
+        logLines.append("[WorkSlop] Saved a copy to Files: \(destination.lastPathComponent)")
+        result = .backupExported(name: zipURL.lastPathComponent, size: BackupExportStore.size(of: zipURL))
+    }
+
+    /// The Files picker was dismissed without saving. The zip stays
+    /// in WorkSlop's storage and the import picker can use it, so
+    /// the result is the same shape as a save — the package is
+    /// saved, only the Files copy did not happen — and the log
+    /// says exactly that.
+    private func exportPickerCancelled() {
+        guard let zipURL = exportZipURL else { return }
+        exportZipURL = nil
+        showExportPicker = false
+        logLines.append("[WorkSlop] Files export cancelled — the zip stays in WorkSlop's storage.")
+        result = .backupExported(name: zipURL.lastPathComponent, size: BackupExportStore.size(of: zipURL))
+    }
+
+    /// Sheet dismissal with no delegate answer (a swipe the delegate
+    /// never reported). The delegate always answers first in the
+    /// normal flows, so this only covers the gap — a run must never
+    /// end with no result at all.
+    private func exportPickerDismissed() {
+        if exportZipURL != nil { exportPickerCancelled() }
     }
 
     /// Delete the selected backup package from WorkSlop's storage
@@ -631,13 +677,35 @@ struct ApplyView: View {
             let version = identity.version.isEmpty ? DeviceInfoEx.fullVersion : identity.version
             do {
                 let package = try await engine.getBackupFile(deviceVersion: version)
-                let size = BackupExportStore.size(of: package)
-                await MainActor.run {
-                    finishRun()
-                    refreshFreeSpace()
-                    refreshBackupPackages()
-                    logLines.append("[100%] Done — backup package saved: \(package.lastPathComponent)")
-                    result = .backupExported(name: package.lastPathComponent, size: size)
+                let dirSize = BackupExportStore.size(of: package)
+                // Zip first, then offer the zip in Files. The
+                // directory package is never deleted by this flow —
+                // it stays, and so does the zip, whatever the user
+                // picks in the picker.
+                do {
+                    let zipURL = try BackupExportZip.zip(package: package)
+                    let zipSize = BackupExportStore.size(of: zipURL)
+                    await MainActor.run {
+                        finishRun()
+                        refreshFreeSpace()
+                        refreshBackupPackages()
+                        logLines.append("[100%] Done — backup package saved: \(package.lastPathComponent)")
+                        logLines.append("[WorkSlop] Zipped package: \(zipURL.lastPathComponent) (\(formattedBytes(zipSize))) — choose where to save it in Files.")
+                        // The result waits for the picker: it is set
+                        // by its saved / cancelled callback, never here.
+                        exportZipURL = zipURL
+                        showExportPicker = true
+                    }
+                } catch {
+                    let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    await MainActor.run {
+                        finishRun()
+                        refreshFreeSpace()
+                        refreshBackupPackages()
+                        logLines.append("[100%] Done — backup package saved: \(package.lastPathComponent)")
+                        logLines.append("[WorkSlop] Could not zip the package: \(message). The directory package stays in WorkSlop's storage, and Force Partial Restore + Import Backup can still use it.")
+                        result = .backupExported(name: package.lastPathComponent, size: dirSize)
+                    }
                 }
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -712,6 +780,39 @@ struct ApplyView: View {
                 ? DeviceStatus.model.hasPrefix("iPhone")
                 : identity.isIPhone
             do {
+                // A zip import package is unpacked to a dot-prefixed
+                // working directory (hidden from the picker, like the
+                // pull's staging tree) and the merge runs on the unpacked
+                // directory, unchanged. A directory package passes through
+                // untouched. The working directory is removed when this
+                // run block exits, success, failure or cancel alike —
+                // the `defer` runs before the catch's result block, and
+                // the merge no longer needs the directory by then.
+                var importWorkingDir: URL?
+                defer {
+                    if let dir = importWorkingDir {
+                        try? FileManager.default.removeItem(at: dir)
+                    }
+                }
+                var effectivePackage = runPackage
+                if runMethod == .forcePartialRestoreImport, let pkg = runPackage,
+                   pkg.pathExtension.lowercased() == "zip" {
+                    let work = BackupExportStore.root.appendingPathComponent(
+                        ".unzipped-\(UUID().uuidString)", conformingTo: .data)
+                    // Assigned BEFORE the unpack: if the unpack throws
+                    // halfway, the `defer` above still removes the
+                    // partial directory instead of leaving it for the
+                    // one-day stale sweep.
+                    importWorkingDir = work
+                    do {
+                        try BackupExportZip.unzip(zip: pkg, to: work)
+                    } catch {
+                        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        throw GoldenNuggetError(
+                            "Could not unpack the selected zip package (\(pkg.lastPathComponent)): \(message)")
+                    }
+                    effectivePackage = work
+                }
                 switch runMethod {
                 case .normal:
                     try await engine.applyTweaks(selection: input.selection,
@@ -735,7 +836,7 @@ struct ApplyView: View {
                                                     deviceVersion: version,
                                                     isIPhone: isIPhone,
                                                     extraPayloads: iconBuild.payloads,
-                                                    importPackage: runPackage)
+                                                    importPackage: effectivePackage)
                 case .getBackupFile:
                     // Unreachable: beginRun routes Get Backup File
                     // to beginBackupExportRun, never here.
@@ -758,6 +859,9 @@ struct ApplyView: View {
                         statusBarActive: statusBar.isActive,
                         iconBundleIDs: iconStage.staged.map(\.bundleID),
                         pairingFingerprint: PairingStore.fingerprint)
+                    if importWorkingDir != nil, let pkg = runPackage {
+                        logLines.append("[WorkSlop] Import package \(pkg.lastPathComponent) was unpacked for this run; the working copy is removed when the run ends.")
+                    }
                     logLines.append("[100%] Done — the engine finished and the device confirmed.")
                     result = .succeeded
                     showRestartSheet = true
